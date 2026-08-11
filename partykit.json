@@ -1,0 +1,5 @@
+{
+  "name": "headhunter-docs-collab",
+  "main": "party/collab.ts",
+  "compatibilityDate": "2024-01-01"
+}

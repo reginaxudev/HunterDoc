@@ -1,0 +1,150 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SharePermission {
+  READ
+  EDIT
+  MANAGE
+}
+
+enum UserRole {
+  ADMIN
+  MEMBER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  name         String
+  passwordHash String
+  role         UserRole @default(MEMBER)
+  color        String   @default("#2563eb")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Folder {
+  id        String   @id @default(cuid())
+  name      String
+  icon      String   @default("📁")
+  parentId  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
+model Document {
+  id                 String      @id @default(cuid())
+  title              String
+  content            Json
+  contentType        String      @default("doc")
+  folderId           String?
+  icon               String      @default("📄")
+  createdBy          String      @default("我")
+  permissionSettings Json?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  shareLinks         ShareLink[]
+}
+
+model ShareLink {
+  id         String          @id @default(cuid())
+  token      String          @unique
+  documentId String
+  document   Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  permission SharePermission @default(READ)
+  encrypted  Boolean         @default(false)
+  createdAt  DateTime        @default(now())
+  expiresAt  DateTime?
+}
+
+model CollabSnapshot {
+  id         String   @id @default(cuid())
+  documentId String   @unique
+  yjsState   Bytes
+  updatedAt  DateTime @updatedAt
+}
+
+model MentionNotification {
+  id            String   @id @default(cuid())
+  userId        String
+  documentId    String
+  documentTitle String
+  documentHref  String
+  fromUserId    String
+  fromUserName  String
+  mentionLabel  String
+  mentionType   String
+  read          Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([userId, read, createdAt])
+  @@index([userId, documentId, fromUserId])
+}
+
+model DocumentRevision {
+  id            String   @id @default(cuid())
+  documentId    String
+  title         String
+  content       Json
+  changeType    String   @default("edit")
+  changeSummary String
+  changeCount   Int      @default(1)
+  userId        String
+  userName      String
+  createdAt     DateTime @default(now())
+
+  @@index([documentId, createdAt])
+}
+
+model DocumentCollaborator {
+  id         String          @id @default(cuid())
+  documentId String
+  userId     String
+  permission SharePermission @default(READ)
+  addedById  String
+  createdAt  DateTime        @default(now())
+
+  @@unique([documentId, userId])
+  @@index([documentId])
+  @@index([userId])
+}
+
+model AdminAlert {
+  id            String   @id @default(cuid())
+  alertType     String
+  documentId    String
+  documentTitle String
+  documentHref  String
+  fromUserId    String
+  fromUserName  String
+  message       String
+  detail        String?
+  read          Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([read, createdAt])
+}
+
+model SyncTombstone {
+  entityType String
+  entityId   String
+  deletedAt  DateTime @default(now())
+
+  @@id([entityType, entityId])
+  @@index([deletedAt])
+}
+
+model SecurityRateLimit {
+  id          String    @id
+  count       Int       @default(0)
+  windowStart DateTime
+  lockedUntil DateTime?
+  updatedAt   DateTime  @updatedAt
+}
