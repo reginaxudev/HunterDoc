@@ -113,19 +113,19 @@ export function getDefaultContent(contentType: ContentType): Record<string, unkn
   }
 }
 
-// --- Sheet types (legacy v1, kept for migration) ---
+// --- Sheet types (legacy v1, kept for migration to Univer) ---
 export interface SheetTab {
   id: string;
   name: string;
   rows: string[][];
-  conditionalFormats?: import("@/lib/sheet-conditional-format").ConditionalFormatRule[];
-  cellStyles?: Record<string, import("@/lib/sheet-cell-style").CellStyle>;
-  mergedRegions?: import("@/lib/sheet-cell-style").MergedRegion[];
+  mergedRegions?: Array<{
+    startRow: number;
+    endRow: number;
+    startCol: number;
+    endCol: number;
+  }>;
   colWidths?: Record<number, number>;
   rowHeights?: Record<number, number>;
-  dropdowns?: Record<string, string[]>;
-  cellMeta?: Record<string, import("@/lib/sheet-cell-meta").CellMeta>;
-  viewState?: import("@/lib/sheet-cell-style").SheetViewState;
 }
 
 export interface SheetData {
