@@ -15,6 +15,7 @@ node_modules
 .DS_Store
 *.md
 !README.md
+docs
 prisma/**/*.db
 prisma/**/*.db-journal
 .sync-state.json

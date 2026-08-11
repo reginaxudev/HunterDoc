@@ -49,6 +49,7 @@ public/uploads/*
 deploy/Caddyfile
 
 # local tooling / caches
+.claude/worktrees/
 .tools/
 .venv-resume/
 .venv/
