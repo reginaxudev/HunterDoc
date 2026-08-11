@@ -2,12 +2,36 @@
 
 将「猎头云文档」部署到自有服务器（推荐香港/新加坡 VPS），支持 **GitHub push 自动构建镜像**。
 
+## 速查
+
+```bash
+# 本地生成生产配置
+npm run deploy:init-env
+
+# 配置 GitHub Actions（需 gh auth login）
+bash scripts/setup-github-actions.sh
+
+# 推送 → 自动构建 ghcr.io/reginaxudev/hunterdoc
+git push origin main
+
+# 服务器一键部署
+sudo bash scripts/server-bootstrap.sh
+```
+
+| 端口 | 用途 |
+|------|------|
+| 80 / 443 | Caddy 对外（HTTPS） |
+| 3000 | App（仅 Docker 内网） |
+
+---
+
 ## 架构
 
 | 组件 | 服务 | 说明 |
 |------|------|------|
-| Next.js 应用 | **Docker** | 网页、API、登录（无 Vercel 4.5MB 请求体限制） |
-| 数据库 | **PostgreSQL** | 可用 Neon 云库，或 Compose 自带 Postgres |
+| Next.js 应用 | **Docker** | 网页、API、登录（无 4.5MB 请求体限制） |
+| 反向代理 | **Caddy** | 自动 HTTPS + 大请求体（表格保存） |
+| 数据库 | **PostgreSQL** | Neon 云库，或 Compose 自带 Postgres |
 | 实时协作 | **Partykit** | 多人同时编辑 WebSocket |
 | CI/CD | **GitHub Actions** | push `main` → 构建镜像 → 可选 SSH 自动部署 |
 
@@ -205,14 +229,6 @@ npm run party                 # 终端 2
 
 ---
 
-## 附录：Vercel 部署（旧方案）
-
-仍可使用 `npx vercel deploy --prod`，但大表格可能遇 413 限制，已不推荐。
-
-详见 git 历史中的 `vercel.json` 配置。
-
----
-
 ## 附录：国内访问
 
-见 **[DEPLOY-CHINA.md](./DEPLOY-CHINA.md)**：香港 VPS + Docker 部署，或自定义域名。
+见 **[DEPLOY-CHINA.md](./DEPLOY-CHINA.md)**：香港 VPS + Docker 部署。

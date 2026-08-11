@@ -106,7 +106,8 @@ npm run party
 
 ## 生产部署
 
-详见 **[DEPLOY.md](./DEPLOY.md)**（Neon + Partykit + Vercel 完整步骤）。
+详见 **[DEPLOY.md](./DEPLOY.md)**（Docker + Neon + Partykit + GitHub Actions）。
+国内访问见 **[DEPLOY-CHINA.md](./DEPLOY-CHINA.md)**。
 
 ---
 
@@ -149,11 +150,12 @@ npm run party
 | 层级 | 技术 |
 |------|------|
 | 框架 | Next.js 15 (App Router) |
-| 编辑器 | TipTap + Yjs |
+| 文档编辑 | TipTap + Yjs |
+| 表格 | Univer Sheets |
 | 实时协作 | Partykit + y-partykit |
 | 数据库 | PostgreSQL + Prisma |
-| AI | OpenAI API |
-| 部署 | Vercel + Neon + Partykit |
+| AI | OpenAI API（可选） |
+| 部署 | Docker + Caddy + GitHub Actions + Neon |
 | 样式 | Tailwind CSS 4 |
 
 ---
@@ -161,23 +163,17 @@ npm run party
 ## 项目结构
 
 ```
-├── app/
-│   ├── page.tsx                    # 工作台
-│   ├── doc/[id]/page.tsx           # 文档编辑（协作）
-│   ├── share/[token]/page.tsx      # 分享页
-│   └── api/                        # REST API
-├── components/
-│   ├── CollaborativeEditor.tsx     # 协作编辑器
-│   ├── ShareDialog.tsx             # 分享弹窗
-│   ├── AISummaryPanel.tsx          # AI 摘要面板
-│   └── PresenceAvatars.tsx         # 在线用户
-├── party/
-│   └── collab.ts                   # Partykit 协作服务
-├── prisma/
-│   └── schema.prisma               # 数据库模型
-└── lib/
-    ├── storage.ts                  # 数据访问层
-    └── ai.ts                       # AI 工具
+├── app/                 # Next.js App Router（页面 + API）
+├── components/          # UI 组件
+├── config/              # 团队成员等配置
+├── deploy/              # Caddy 配置模板
+├── lib/                 # 业务逻辑、安全、存储、表格保存
+├── party/               # Partykit 协作服务
+├── prisma/              # Schema + seed
+├── scripts/             # 开发 / 部署 / 运维脚本
+├── types/               # 共享类型
+├── docker-compose.yml          # 本地 Postgres
+└── docker-compose.prod.yml     # 生产 App + Caddy (+可选 Postgres)
 ```
 
 ---

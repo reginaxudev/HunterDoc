@@ -21,6 +21,8 @@
 # misc
 .DS_Store
 *.pem
+*.tsbuildinfo
+next-env.d.ts
 
 # debug
 npm-debug.log*
@@ -28,37 +30,32 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files
+# env files (keep examples)
 .env
 .env*.local
+.env.production
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-prisma/dev.db
-prisma/dev.db-journal
+# local databases / sync
 prisma/**/*.db
 prisma/**/*.db-journal
 .sync-state.json
 
-# uploads
+# uploads (runtime)
 public/uploads/*
 !public/uploads/.gitkeep
-.deploy/Caddyfile
 
-# local tooling / venv
+# generated Caddy config
+deploy/Caddyfile
+
+# local tooling / caches
 .tools/
 .venv-resume/
+.venv/
 .partykit/state/
+.vercel/
+.cursor/
 
-# local resume assets (not part of HunterDoc app)
-*.pdf
-*.png
-*.xlsx
-*.cid
-*.cff
-fontawesome.ttf
-sun_ming_resume.py
-名单_*.xlsx
-孙明_*.pdf
+# OS / editor
+.idea/
+.vscode/
+*.swp
