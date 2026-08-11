@@ -3,7 +3,7 @@ import {
   SESSION_COOKIE,
   verifySessionToken,
 } from "@/lib/auth/session";
-import { isAdminPath } from "@/lib/security/login-guard";
+import { isAdminPath } from "@/lib/security/paths";
 
 const PUBLIC_PATHS = ["/login"];
 const PUBLIC_API_PREFIXES = [

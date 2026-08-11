@@ -29,7 +29,7 @@
 - 一键生成候选人/项目摘要报告
 - 支持 OpenAI API（未配置时自动降级为规则摘要）
 
-### 云端部署
+### 云端部署（Docker + GitHub Actions）
 
 完整步骤见 **[DEPLOY.md](./DEPLOY.md)**。
 
@@ -40,19 +40,20 @@ npm run deploy
 # 2. 部署 Partykit 协作服务
 npm run deploy:partykit
 
-# 3. 部署到 Vercel
-npm run deploy:vercel
+# 3. 服务器上 Docker 部署
+cp .env.docker.example .env.production   # 编辑环境变量
+npm run deploy:docker                    # 或 deploy:docker:db（含 Postgres）
 
-# 4. 在 Vercel 控制台配置环境变量后 Redeploy
-
-# 5. 初始化生产数据库成员账号
+# 4. 初始化生产数据库成员账号
 DATABASE_URL="postgresql://..." npm run deploy:seed
+
+# 5. push 到 GitHub main → 自动构建 ghcr.io 镜像
 ```
 
 | 变量 | 说明 | 示例 |
 |------|------|------|
-| `DATABASE_URL` | Neon PostgreSQL 连接串 | `postgresql://...?sslmode=require` |
-| `NEXT_PUBLIC_APP_URL` | 应用公网域名 | `https://your-app.vercel.app` |
+| `DATABASE_URL` | PostgreSQL 连接串 | `postgresql://...?sslmode=require` |
+| `NEXT_PUBLIC_APP_URL` | 应用公网域名 | `https://doc.example.com` |
 | `NEXT_PUBLIC_PARTYKIT_HOST` | Partykit 协作服务地址 | `headhunter-docs-collab.user.partykit.dev` |
 | `AUTH_SECRET` | 登录会话密钥（≥16 位） | `npm run deploy:secret` 生成 |
 | `DEFAULT_PASSWORD` | 成员默认登录密码 | `Lt@202607` |

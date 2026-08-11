@@ -130,6 +130,4 @@ export async function checkAccountsListRateLimit(
   return { ok: true };
 }
 
-export function isAdminPath(pathname: string): boolean {
-  return pathname === "/admin" || pathname.startsWith("/admin/");
-}
+export { isAdminPath } from "@/lib/security/paths";

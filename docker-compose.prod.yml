@@ -1,0 +1,49 @@
+# 生产环境 Docker Compose
+# 用法：cp .env.docker.example .env.production && 编辑后执行 npm run deploy:docker
+
+services:
+  app:
+    image: ${DOCKER_IMAGE:-ghcr.io/reginaxudev/hunterdoc:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+        NEXT_PUBLIC_PARTYKIT_HOST: ${NEXT_PUBLIC_PARTYKIT_HOST:-localhost:1999}
+        NEXT_PUBLIC_SYNC_ENABLED: ${NEXT_PUBLIC_SYNC_ENABLED:-false}
+        NEXT_PUBLIC_SYNC_POLL_INTERVAL_MS: ${NEXT_PUBLIC_SYNC_POLL_INTERVAL_MS:-5000}
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+    volumes:
+      - uploads:/app/public/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  postgres:
+    profiles: ["with-db"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-headhunter}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-headhunter}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+  uploads:

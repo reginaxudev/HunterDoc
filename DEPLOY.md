@@ -1,220 +1,218 @@
-# 公网部署指南
+# 公网部署指南（Docker）
 
-将「猎头云文档」部署到公网，供团队在外网登录使用。
+将「猎头云文档」部署到自有服务器（推荐香港/新加坡 VPS），支持 **GitHub push 自动构建镜像**。
 
 ## 架构
 
 | 组件 | 服务 | 说明 |
 |------|------|------|
-| Next.js 应用 | **Vercel** | 网页、API、登录 |
-| 数据库 | **Neon PostgreSQL** | 文档、用户、权限 |
+| Next.js 应用 | **Docker** | 网页、API、登录（无 Vercel 4.5MB 请求体限制） |
+| 数据库 | **PostgreSQL** | 可用 Neon 云库，或 Compose 自带 Postgres |
 | 实时协作 | **Partykit** | 多人同时编辑 WebSocket |
+| CI/CD | **GitHub Actions** | push `main` → 构建镜像 → 可选 SSH 自动部署 |
 
 ---
 
-## 一、创建数据库（Neon，免费）
+## 一、准备数据库
 
-1. 打开 [neon.tech](https://neon.tech)，注册并登录
-2. 点击 **New Project**，区域选 **Singapore** 或 **Tokyo**（离国内较近）
-3. 进入项目 → **Connection Details** → 复制 **Connection string**
-4. 确保连接串包含 `?sslmode=require`
+**方式 A：Neon（免运维）**
 
-示例：
+1. [neon.tech](https://neon.tech) 创建项目，区域选 Singapore / Tokyo
+2. 复制 Connection string，写入 `.env.production` 的 `DATABASE_URL`
+
+**方式 B：Docker 自带 PostgreSQL**
+
+`.env.production` 中设置：
+
+```env
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=强密码
+POSTGRES_DB=headhunter
+DATABASE_URL=postgresql://postgres:强密码@postgres:5432/headhunter
 ```
-postgresql://user:password@ep-xxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
-```
+
+启动时加 profile：`npm run deploy:docker:db`
 
 ---
 
-## 二、部署 Partykit 协作服务
-
-在项目根目录执行：
+## 二、部署 Partykit
 
 ```bash
 npm run deploy:partykit
 ```
 
-首次运行会打开浏览器，用 Cloudflare 账号登录 Partykit。
+记下 host，填入 `.env.production`：
 
-部署成功后终端会显示类似：
-```
-Deployed to https://headhunter-docs-collab.你的用户名.partykit.dev
-```
-
-**重要：** 将 `AUTH_SECRET`（与 Vercel 相同）配置到 PartyKit，否则协作连接会被拒绝：
-
-```bash
-npx partykit env add AUTH_SECRET
-npm run deploy:partykit
-```
-
-记下 host（不含 `https://`）：
-```
-headhunter-docs-collab.你的用户名.partykit.dev
+```env
+NEXT_PUBLIC_PARTYKIT_HOST=headhunter-docs-collab.xxx.partykit.dev
 ```
 
 ---
 
-## 三、部署到 Vercel
+## 三、服务器 Docker 部署
+
+### 3.1 准备环境文件
 
 ```bash
-npm run deploy:vercel
+git clone https://github.com/reginaxudev/HunterDoc.git
+cd HunterDoc
+cp .env.docker.example .env.production
 ```
 
-首次运行会要求：
-1. 登录 Vercel 账号（浏览器授权）
-2. 选择或创建项目
-3. 确认部署设置
+编辑 `.env.production`（至少修改）：
 
-部署完成后会得到网址，例如：
-```
-https://headhunter-docs-xxx.vercel.app
-```
+| 变量 | 说明 |
+|------|------|
+| `NEXT_PUBLIC_APP_URL` | 公网访问地址，如 `https://doc.example.com` |
+| `DATABASE_URL` | PostgreSQL 连接串 |
+| `AUTH_SECRET` | `npm run deploy:secret` 生成 |
+| `DEFAULT_PASSWORD` | 团队成员默认密码 |
+| `NEXT_PUBLIC_PARTYKIT_HOST` | Partykit 地址 |
 
----
+### 3.2 首次启动
 
-## 四、配置 Vercel 环境变量
-
-进入 [vercel.com](https://vercel.com) → 你的项目 → **Settings** → **Environment Variables**，添加：
-
-| 变量 | 值 | 环境 |
-|------|-----|------|
-| `DATABASE_URL` | Neon 连接串 | Production |
-| `AUTH_SECRET` | 随机字符串（见下方生成命令） | Production |
-| `DEFAULT_PASSWORD` | 团队默认登录密码 | Production |
-| `NEXT_PUBLIC_APP_URL` | `https://你的项目.vercel.app` | Production |
-| `NEXT_PUBLIC_PARTYKIT_HOST` | `headhunter-docs-collab.xxx.partykit.dev` | Production |
-| `OPENAI_API_KEY` | （可选）AI 摘要 | Production |
-
-生成 AUTH_SECRET：
 ```bash
-npm run deploy:secret
+# 外部数据库（Neon）
+npm run deploy:docker
+
+# 或自带 PostgreSQL
+npm run deploy:docker:db
 ```
 
-配置完成后，在 Vercel 项目页点击 **Deployments** → 最新部署 → **Redeploy**。
+容器启动时会自动执行 `prisma db push` 同步表结构。
 
----
+### 3.3 初始化团队成员账号
 
-## 五、初始化生产数据库
-
-在本地终端执行（将 `DATABASE_URL` 换成 Neon 连接串）：
+在能访问生产数据库的机器上执行：
 
 ```bash
 DATABASE_URL="postgresql://..." npm run deploy:seed
 ```
 
-这会创建团队成员账号。默认密码为 `DEFAULT_PASSWORD` 环境变量中的值（未设置则为 `Lt@202607`）。
+### 3.4 访问
 
-管理员账号见 `config/team-members.ts`（默认用户名 `yu`）。
+```
+http://服务器IP:3000/login
+```
+
+生产环境建议在前面加 **Nginx / Caddy** 配置 HTTPS 与反向代理。
 
 ---
 
-## 六、访问
+## 四、GitHub 自动部署
 
-打开：
-```
-https://你的项目.vercel.app/login
-```
+### 4.1 镜像构建（默认开启）
 
-用团队成员账号登录即可。
+每次 push 到 `main`，GitHub Actions 会：
 
----
+1. 构建 Docker 镜像
+2. 推送到 `ghcr.io/reginaxudev/hunterdoc:latest`
 
-## 本地开发（切换 PostgreSQL 后）
+在 GitHub 仓库 → **Packages** 可查看镜像。
 
-生产使用 PostgreSQL，本地也建议用 PostgreSQL：
+### 4.2 构建时注入前端变量（Repository Variables）
 
-**方式 A：Docker（推荐）**
-```bash
-docker compose up -d
-```
+Settings → Secrets and variables → Actions → **Variables**：
 
-`.env` 中设置：
-```
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/headhunter"
-```
+| Variable | 示例 |
+|----------|------|
+| `NEXT_PUBLIC_APP_URL` | `https://doc.example.com` |
+| `NEXT_PUBLIC_PARTYKIT_HOST` | `headhunter-docs-collab.xxx.partykit.dev` |
 
-**方式 B：Neon 开发分支**
+修改后需重新 push 触发构建（这些变量在 build 阶段写入前端）。
 
-在 Neon 创建 dev branch，本地 `.env` 使用 dev 连接串。
+### 4.3 服务器自动拉取部署（可选）
 
-初始化本地库：
-```bash
-npm run db:push
-npm run db:seed
-```
-
-启动：
-```bash
-npm run dev          # 终端 1（若启用 SYNC_* 会自动跑同步守护进程）
-npm run party        # 终端 2（本地协作）
-```
-
----
-
-## 本地 ↔ 公网数据同步
-
-若希望**本地开发库**与**公网 Neon 生产库**保持实时一致（文档、文件夹、权限、分享链接等），在 `.env` 中配置：
+1. 服务器安装 Docker，克隆仓库，配置好 `.env.production`
+2. `.env.production` 中设置：
 
 ```env
-SYNC_ENABLED="true"
-SYNC_REMOTE_DATABASE_URL="postgresql://...neon...?sslmode=require"
-SYNC_INTERVAL_MS="5000"
-
-NEXT_PUBLIC_SYNC_ENABLED="true"
-NEXT_PUBLIC_SYNC_POLL_INTERVAL_MS="5000"
+DOCKER_IMAGE=ghcr.io/reginaxudev/hunterdoc:latest
 ```
 
-说明：
+3. GitHub → Settings → Secrets and variables → Actions → **Secrets**：
 
-- `DATABASE_URL`：本地 PostgreSQL（Docker 或 Neon dev branch）
-- `SYNC_REMOTE_DATABASE_URL`：公网 Neon 连接串（与 Vercel 上 `DATABASE_URL` 相同）
-- 本地保存/删除文档时会**立即推送**到公网；守护进程每 5 秒**双向拉取**增量变更
-- 冲突策略：**最后更新时间（updatedAt）优先**
-- 删除操作通过 `SyncTombstone` 表同步到对端
-- 首次启用前，本地与公网都需执行 `npm run db:push`（新增 `SyncTombstone` 表）
+| Secret | 说明 |
+|--------|------|
+| `DEPLOY_HOST` | 服务器 IP 或域名 |
+| `DEPLOY_USER` | SSH 用户名 |
+| `DEPLOY_SSH_KEY` | SSH 私钥 |
+| `DEPLOY_PATH` | 服务器上项目路径，如 `/opt/HunterDoc` |
 
-单独运行同步（不启动 Next.js）：
+4. **Variables** 中添加：
+
+```env
+SSH_DEPLOY_ENABLED=true
+```
+
+之后每次 push `main`，Actions 会 SSH 到服务器执行：
 
 ```bash
-npm run sync          # 守护进程
-npm run sync:once     # 单次全量/增量同步
+docker compose -f docker-compose.prod.yml pull app
+docker compose -f docker-compose.prod.yml up -d
 ```
 
-查看同步状态：`GET /api/sync/status`（仅本地开发环境有效）
+### 4.4 手动更新（不用 SSH 自动部署时）
 
-**注意：** 同步守护进程仅在本地运行；公网 Vercel 上的编辑会通过拉取同步到本地。协作用户 ID 按 `username` 自动映射。
+```bash
+cd /opt/HunterDoc
+git pull
+npm run deploy:docker:pull
+```
 
 ---
 
-## 常用命令
+## 五、常用命令
 
 ```bash
 npm run deploy              # 显示部署检查清单
+npm run deploy:docker       # 构建并启动（外部数据库）
+npm run deploy:docker:db    # 构建并启动（含 Postgres）
+npm run deploy:docker:pull  # 拉取最新镜像并重启
 npm run deploy:partykit     # 部署 Partykit
-npm run deploy:vercel       # 部署 Vercel 生产环境
-npm run deploy:seed         # 初始化生产数据库（需 DATABASE_URL）
+npm run deploy:seed         # 本地初始化数据库账号
 npm run deploy:secret       # 生成 AUTH_SECRET
-npm run sync                # 本地↔公网同步守护进程
-npm run sync:once           # 单次同步
+
+# 查看日志
+docker compose -f docker-compose.prod.yml logs -f app
+
+# 重启
+docker compose -f docker-compose.prod.yml restart app
 ```
 
 ---
 
-## 自定义域名（可选）
+## 六、本地开发
 
-1. Vercel 项目 → **Settings** → **Domains** → 添加你的域名
-2. 按提示在 DNS 添加 CNAME 记录
-3. 更新 `NEXT_PUBLIC_APP_URL` 为新域名并 Redeploy
+```bash
+docker compose up -d          # 本地 PostgreSQL
+npm run db:push && npm run db:seed
+npm run dev                   # 终端 1
+npm run party                 # 终端 2
+```
 
 ---
 
-## 故障排查
+## 七、故障排查
 
 | 问题 | 处理 |
 |------|------|
-| 登录后立即退出 | 检查 `AUTH_SECRET` 是否已在 Vercel 配置并 Redeploy |
-| 协作不同步 | 确认 `NEXT_PUBLIC_PARTYKIT_HOST` 正确，且 Partykit 已部署 |
-| 分享链接不对 | 确认 `NEXT_PUBLIC_APP_URL` 为公网域名 |
-| 构建失败 | 确认 Vercel 已配置 `DATABASE_URL`，构建时会执行 `prisma db push` |
-| 国内打不开 / ERR_CONNECTION_TIMED_OUT | 见 **[DEPLOY-CHINA.md](./DEPLOY-CHINA.md)**：绑定自定义域名或 Docker 部署到香港 |
+| 容器启动失败 | `docker compose -f docker-compose.prod.yml logs app` 查看 DATABASE_URL 是否正确 |
+| 登录后立即退出 | 检查 `AUTH_SECRET` 是否配置且重启容器 |
+| 表格保存 413 | Docker 无 Vercel 4.5MB 限制，确认已切到 Docker 而非 vercel.app |
+| 协作不同步 | 确认 `NEXT_PUBLIC_PARTYKIT_HOST` 正确，需重新构建镜像 |
+| GHCR 拉取失败 | 私有镜像需 `docker login ghcr.io`，或使用公开 Package 权限 |
+
+---
+
+## 附录：Vercel 部署（旧方案）
+
+仍可使用 `npx vercel deploy --prod`，但大表格可能遇 413 限制，已不推荐。
+
+详见 git 历史中的 `vercel.json` 配置。
+
+---
+
+## 附录：国内访问
+
+见 **[DEPLOY-CHINA.md](./DEPLOY-CHINA.md)**：香港 VPS + Docker 部署，或自定义域名。
