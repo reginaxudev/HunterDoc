@@ -5,23 +5,21 @@
 ## 速查
 
 ```bash
-# 本地生成生产配置
+# —— 本地 Docker 一键启动（App + Postgres）——
+npm run docker:local
+# → http://localhost:3000/login   yu / Lt@202607
+
+# —— 生产 / 服务器 ——
 npm run deploy:init-env
-
-# 配置 GitHub Actions（需 gh auth login）
 bash scripts/setup-github-actions.sh
-
-# 推送 → 自动构建 ghcr.io/reginaxudev/hunterdoc
 git push origin main
-
-# 服务器一键部署
 sudo bash scripts/server-bootstrap.sh
 ```
 
-| 端口 | 用途 |
-|------|------|
-| 80 / 443 | Caddy 对外（HTTPS） |
-| 3000 | App（仅 Docker 内网） |
+| 场景 | 命令 | 访问 |
+|------|------|------|
+| 本地 Docker | `npm run docker:local` | http://localhost:3000 |
+| 生产 Compose | `npm run deploy:docker` | 域名 / 80·443（Caddy） |
 
 ---
 

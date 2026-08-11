@@ -34,6 +34,7 @@ yarn-error.log*
 .env
 .env*.local
 .env.production
+.env.docker.local
 
 # local databases / sync
 prisma/**/*.db

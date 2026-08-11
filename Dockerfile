@@ -43,11 +43,13 @@ COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder /app/config ./config
+COPY --from=builder /app/lib/auth/password.ts ./lib/auth/password.ts
 COPY --from=builder /app/scripts/docker-entrypoint.sh ./docker-entrypoint.sh
 
 RUN chmod +x /app/docker-entrypoint.sh \
   && mkdir -p /app/public/uploads \
-  && chown -R nextjs:nodejs /app/public/uploads
+  && chown -R nextjs:nodejs /app/public/uploads /app/prisma /app/config /app/lib /app/docker-entrypoint.sh
 
 USER nextjs
 EXPOSE 3000

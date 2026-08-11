@@ -82,15 +82,25 @@ cp .env.example .env
 
 ### 4. 初始化数据库
 
+**方式 A：一键 Docker（推荐，无需本机 Node）**
+
+```bash
+npm run docker:local
+# 打开 http://localhost:3000/login
+# 管理员 yu / Lt@202607
+```
+
+**方式 B：本机 Node + Docker 仅跑 Postgres**
+
 ```bash
 npm run db:local    # 启动本地 PostgreSQL（Docker）
 npm run db:push
 npm run db:seed
 ```
 
-本地使用 PostgreSQL（见 `docker-compose.yml`），也可使用 Neon 开发分支连接串。
+本地使用 PostgreSQL（见 `docker-compose.yml` / `docker-compose.local.yml`），也可使用 Neon 开发分支连接串。
 
-### 5. 启动服务（需要两个终端）
+### 5. 启动服务（方式 B 需要两个终端）
 
 ```bash
 # 终端 1：Next.js 应用

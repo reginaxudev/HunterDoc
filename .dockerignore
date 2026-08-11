@@ -5,6 +5,7 @@ node_modules
 .cursor
 .env
 .env*.local
+!.env.docker.local.example
 .env.production
 .venv-resume
 .venv
