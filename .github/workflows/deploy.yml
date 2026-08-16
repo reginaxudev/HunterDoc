@@ -1,0 +1,80 @@
+name: Deploy
+
+# The release gate. release.yml builds and publishes but never ships; this
+# workflow is dispatched by hand, so nothing reaches production without a
+# deliberate action. It exists as a separate workflow rather than an approval
+# step because environment protection rules require a paid plan on private
+# repositories.
+#
+# It deploys a published release by tag, which means what ships is exactly the
+# artifact that was built and tagged — no rebuild, no drift.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to deploy, e.g. v0.4.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://hunterdoc.expture.cn
+    steps:
+      - name: Validate tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          # The tag reaches gh and the shell below, so constrain its shape.
+          if ! printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::tag must look like v1.2.3, got ${TAG}"
+            exit 1
+          fi
+
+      - name: Fetch the release bundle
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --pattern bundle.tar.gz
+          ls -lh bundle.tar.gz
+
+      - name: Ship and deploy
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pin the host key rather than disabling the check, so a hijacked DNS
+          # or IP cannot harvest this connection.
+          printf '%s\n' "$DEPLOY_HOST_KEY" > ~/.ssh/known_hosts
+          # The key is restricted server-side to the receive script, so any
+          # command sent here is ignored; the tarball on stdin is the payload.
+          ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" < bundle.tar.gz
+
+      - name: Verify the site answers
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          code="$(curl -s -o /dev/null -m 20 -w '%{http_code}' https://hunterdoc.expture.cn/api/health)"
+          if [ "$code" != "200" ]; then
+            echo "::error::health check returned ${code} after deploy"
+            exit 1
+          fi
+          echo "::notice::${TAG} deployed, health check passed."

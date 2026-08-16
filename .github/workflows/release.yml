@@ -4,6 +4,11 @@ name: Release
 # The branch name is the release contract — it must match package.json, and it
 # becomes the tag. Building here rather than on the box also removes the whole
 # class of cross-platform issues that come from building on a laptop.
+#
+# This workflow only builds and publishes; it never touches production.
+# Shipping is a separate, manually dispatched workflow (deploy.yml) because
+# environment protection rules are not available on private repos under the
+# free plan, so the manual dispatch is what provides the release gate.
 on:
   push:
     branches:
@@ -96,50 +101,25 @@ jobs:
           git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
           git push origin "v${{ steps.version.outputs.version }}"
 
-  deploy:
-    name: Deploy to production
+  publish:
+    name: Publish release
     needs: build
     runs-on: ubuntu-latest
-    # Gated: the job waits here until the environment's reviewers approve.
-    environment:
-      name: production
-      url: https://hunterdoc.expture.cn
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: bundle
 
-      - name: Ship and deploy
-        env:
-          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          # Pin the host key instead of disabling checking, so a hijacked DNS
-          # or IP cannot collect our deploy connection.
-          printf '%s\n' "$DEPLOY_HOST_KEY" > ~/.ssh/known_hosts
-          # The key is restricted server-side to the receive script, so the
-          # command sent here is ignored; the tarball on stdin is the payload.
-          ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" < bundle.tar.gz
-
-  publish:
-    name: Publish release notes
-    needs: [build, deploy]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: bundle
-
+      # The bundle is attached here so deploy.yml can fetch it by tag. It runs
+      # on a hosted runner, so pulling from the release CDN is fine — that path
+      # is only unreachable from the production host itself.
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.build.outputs.version }}
           name: v${{ needs.build.outputs.version }}
           generate_release_notes: true
           files: bundle.tar.gz
+
+      - name: Next step
+        run: |
+          echo "::notice::Built v${{ needs.build.outputs.version }}. Deploy it from Actions -> Deploy -> Run workflow."

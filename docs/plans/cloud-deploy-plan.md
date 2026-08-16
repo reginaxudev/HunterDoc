@@ -180,11 +180,19 @@ git push origin release/0.4.0
 1. 校验分支名格式、与 `package.json` 的 version 一致、tag 未占用
 2. 构建 standalone，校验产物包含目标平台的 Prisma engine
 3. 打并推送 `v0.4.0` tag
-4. **停在 production environment 等待审批**
-5. 审批后把产物经 SSH 推到服务器，服务器执行 `db push` 并重启
-6. 创建 GitHub Release 并附带产物
+4. 创建 GitHub Release 并附上产物包
 
-任一校验失败都会在打 tag 之前中止，不会留下半个发布。
+任一校验失败都会在打 tag 之前中止，不会留下半个发布。**该流程不接触生产环境。**
+
+上线是独立的一步：在 Actions 页面选 Deploy 工作流，点 Run workflow，填入 tag（如 `v0.4.0`）。它会下载该 tag 的 Release 产物、经 SSH 推送到服务器、执行 `db push` 并重启，最后校验 `/api/health` 返回 200。
+
+发布与上线分离带来两个好处：上线的产物就是当初打 tag 时构建的那一份，不存在重新构建导致的漂移；回滚只需用旧 tag 再跑一次 Deploy。
+
+### 为什么闸门是手动触发而不是审批
+
+原计划用 GitHub Environment 的 Required reviewers 做审批。实际配置时发现该功能对个人账户下的私有仓库不可用——environment 能建，但保护规则区域不存在。手动触发的 Deploy 工作流提供了等价的人工确认，且无需付费计划。
+
+`production` environment 仍然保留并绑定在 Deploy 工作流上，用于记录部署历史和展示线上地址。
 
 ### 需要在 GitHub 配置的内容
 
@@ -196,7 +204,7 @@ git push origin release/0.4.0
 | Secret | `DEPLOY_HOST` | 服务器 IP |
 | Secret | `DEPLOY_USER` | `root` |
 | Secret | `DEPLOY_HOST_KEY` | `ssh-keyscan` 得到的主机公钥行，用于固定 host key |
-| Environment | `production` | 添加 required reviewers，这是发布闸门 |
+| Environment | `production` | 仅用于记录部署历史；保护规则在免费私有仓库不可用，闸门由手动触发提供 |
 | Variable（可选） | `NEXT_PUBLIC_APP_URL` / `NEXT_PUBLIC_PARTYKIT_HOST` | 不设则用 workflow 内的默认值 |
 
 ### 部署密钥的权限边界
