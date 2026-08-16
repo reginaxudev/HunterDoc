@@ -5,6 +5,18 @@ COPY package.json package-lock.json ./
 COPY prisma ./prisma
 RUN npm ci
 
+# Self-contained Prisma CLI tree for the entrypoint's `prisma db push`.
+# Cherry-picking node_modules/prisma out of the app tree drops its transitive
+# deps (@prisma/config -> c12 / deepmerge-ts / effect / empathic ...), so the
+# CLI is installed on its own, pinned to the version in package-lock.json.
+FROM node:22-alpine AS prisma-cli
+WORKDIR /cli
+COPY package-lock.json ./
+RUN PRISMA_VERSION="$(node -p 'require("./package-lock.json").packages["node_modules/prisma"].version')" \
+  && rm package-lock.json \
+  && npm init -y > /dev/null \
+  && npm install --omit=dev --no-audit --no-fund "prisma@${PRISMA_VERSION}"
+
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
@@ -39,17 +51,21 @@ RUN addgroup --system --gid 1001 nodejs \
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/package.json ./package.json
+COPY --from=prisma-cli /cli/node_modules ./node_modules
+# after the CLI tree, so the client generated in builder wins on @prisma/client
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
-COPY --from=builder /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/config ./config
 COPY --from=builder /app/lib/auth/password.ts ./lib/auth/password.ts
 COPY --from=builder /app/scripts/docker-entrypoint.sh ./docker-entrypoint.sh
 
+# .bin/prisma must be recreated as a symlink: COPY dereferences it into a plain
+# file, and build/index.js then resolves its sibling .wasm assets against .bin/
 RUN chmod +x /app/docker-entrypoint.sh \
+  && mkdir -p /app/node_modules/.bin \
+  && ln -sf ../prisma/build/index.js /app/node_modules/.bin/prisma \
   && mkdir -p /app/public/uploads \
   && chown -R nextjs:nodejs /app/public/uploads /app/prisma /app/config /app/lib /app/docker-entrypoint.sh
 

@@ -1,10 +1,12 @@
 import { PrismaClient, UserRole } from "@prisma/client";
-import { hashPassword } from "../lib/auth/password";
+// explicit .ts extensions: the container runs this file through Node's type
+// stripping, whose ESM resolver does not infer extensions
+import { hashPassword } from "../lib/auth/password.ts";
 import {
   DEFAULT_MEMBER_PASSWORD,
   MEMBER_COLORS,
   TEAM_MEMBERS_SEED,
-} from "../config/team-members";
+} from "../config/team-members.ts";
 
 const prisma = new PrismaClient();
 
