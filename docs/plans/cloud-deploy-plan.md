@@ -12,11 +12,15 @@
 
   PostgreSQL  127.0.0.1:5432   库与用户均为 hunterdoc
   部署目录     /www/wwwroot/hunterdoc
-  进程管理     宝塔 Node 项目管理器（root 的 pm2 托管，www 用户运行），与 Orbiter 同构
-  构建方式     服务器本地构建（不走 CI）
+  进程管理     root 的 pm2，配置见 deploy/ecosystem.config.cjs
+  构建方式     构建机（本地）构建，rsync 到服务器暂存区，服务器只组装
 
 既有 dev.expture.cn → 127.0.0.1:3000 Orbiter，完全不动
 ```
+
+宝塔在这套架构里只承担两件事：提供站点 vhost（nginx 反代入口）和签发续期 SSL 证书。进程不交给它管，因为宝塔的 Node 项目是一个项目一个进程，而本应用需要常驻两个。
+
+顺带澄清一个容易误判的事实：宝塔的 Node 项目管理器**不使用 pm2**。Orbiter 的进程 PPID 为 1（spawn 后脱离，由 systemd 收养），既不在 root 的 pm2 列表里，www 用户也没有 pm2 实例。所以本项目的 pm2 与宝塔的机制互不干扰。
 
 ## 服务器现状与硬约束
 
@@ -37,11 +41,15 @@
 
 而 `NEXT_PUBLIC_*` 是构建期内联进 JS 的，先按 http 构建、后补 SSL 需要整个重新构建。所以证书必须在 Step 3 之前就位。
 
-### 约束 2：Prisma engine 是平台绑定的
+### 约束 2：Prisma engine 的目标平台必须实测，不能推断
 
-`prisma/schema.prisma` 的 generator 未配 `binaryTargets`，只生成当前平台 engine（本地 macOS 实测只有 `libquery_engine-darwin-arm64.dylib.node`）。
+产物在构建机上生成、在服务器上运行，因此 `binaryTargets` 必须显式声明服务器平台，否则运行时报 `PrismaClientInitializationError`。
 
-本方案在服务器上构建，native target 恰好就是服务器平台，因此不需要改动。**但如果将来改走 CI 构建**（Ubuntu 上产出、RHEL 上运行），必须显式加 `binaryTargets = ["native", "rhel-openssl-3.0.x"]`，否则运行时找不到 engine。该 target 名已从 `@prisma/get-platform` 安装源码核实。
+**踩过的坑**：按系统特征推断（OpenCloudOS 属 RHEL 系，OpenSSL 3.0.12）配了 `rhel-openssl-3.0.x`，部署后首次查询即失败。Prisma 在这台机器上实际解析出的是 `debian-openssl-1.0.x`——服务器上 `npm ci` 自动生成的 native engine 就是这个名字，而用它执行的 `prisma db push` 是成功的，说明该判定虽反直觉但确实可用。
+
+当前配置为 `["native", "debian-openssl-1.0.x", "rhel-openssl-3.0.x"]`，保留 rhel 是为了 Prisma 升级后判定变化时仍能落地。
+
+正确的确认方式不是查系统信息，而是在目标机器上跑一次 `npx prisma generate`，看它生成了哪个 engine 文件。`deploy/push-build.sh` 已把该 engine 的存在性作为打包前的硬校验。
 
 ### 约束 3：PartyKit 没有自托管生产模式
 
@@ -57,97 +65,99 @@ PartyKit CLI 只有 `partykit dev`（miniflare 本地模拟）和 `partykit depl
 
 这样拆的依据：两种后端的客户端连接地址都是 `wss://hunterdoc.expture.cn/parties/...`，靠 nginx 反代到 1999，所以 `NEXT_PUBLIC_PARTYKIT_HOST` 的值不变，第一阶段的证书、nginx 配置、数据库、pm2 配置在替换时全部复用，只需重新构建一次。
 
-## 前置动作（用户在宝塔面板完成）
 
-| 项 | 状态 |
+## 部署结果
+
+第一阶段已完成，`https://hunterdoc.expture.cn` 可用。验证覆盖：未登录访问根路径正确重定向到登录页、登录、新建文档、双端协同编辑实时同步、刷新后内容持久化、静态资源、Orbiter 共存未受影响。
+
+实际落地与原计划的差异：
+
+| 项 | 计划 | 实际 |
+| --- | --- | --- |
+| 构建位置 | 服务器本地构建 | 构建机构建后 rsync 产物，服务器只组装。绕开 1.1G 内存的 OOM 风险 |
+| Prisma target | `rhel-openssl-3.0.x` | `debian-openssl-1.0.x`（见约束 2） |
+| 站点类型 | 宝塔 Node 项目 | 宝塔普通站点仅提供 vhost 与证书，进程由 pm2 管 |
+
+## 运维手册
+
+### 发布新版本
+
+构建机执行，产物自动传到服务器暂存区：
+
+```bash
+bash deploy/push-build.sh
+```
+
+服务器执行（root），组装并重启：
+
+```bash
+bash /www/wwwroot/hunterdoc/deploy/server-deploy.sh            # 含 prisma db push
+bash /www/wwwroot/hunterdoc/deploy/server-deploy.sh --skip-db  # 跳过库变更
+```
+
+`push-build.sh` 会在打包前校验产物里存在目标平台的 Prisma engine，缺失直接中止，不会把跑不起来的包传上去。
+
+### 关键路径
+
+| 项 | 位置 |
 | --- | --- |
-| DNS：`hunterdoc.expture.cn` A 记录指向 101.43.223.211 | 已完成 |
-| PostgreSQL 安装，建库建用户（均为 hunterdoc） | 已完成 |
-| 宝塔新建站点 `hunterdoc.expture.cn`，PHP 选纯静态 | 待办 |
-| 申请 Let's Encrypt 证书并开启强制 HTTPS | 待办，阻塞 Step 3 |
-| 站点配置粘贴 nginx 反代（模板见 Step 2） | 待办 |
+| 部署目录 | `/www/wwwroot/hunterdoc` |
+| 产物暂存区 | `/home/kyle/hunterdoc-stage` |
+| 环境变量 | `/www/wwwroot/hunterdoc/.env.production` 与 `.env`（两者 AUTH_SECRET 必须一致） |
+| nginx vhost | `/www/server/panel/vhost/nginx/hunterdoc.expture.cn.conf` |
+| vhost 备份 | `/root/hunterdoc.vhost.with-proxy.bak` |
+| 日志 | `/www/wwwroot/hunterdoc/logs/` 与 `pm2 logs hunterdoc` |
 
-注意：DNS 虽已生效，但因为宝塔里还没有对应站点，nginx 匹配不到 server_name，当前 `http://hunterdoc.expture.cn` 返回的是 Orbiter 的页面。
+### 修改配置后是否需要重新构建
 
-## 实施步骤
+`NEXT_PUBLIC_*` 在构建期被内联进 JS，改这些值必须重新走 `push-build.sh`。其余运行时变量（`DATABASE_URL`、`AUTH_SECRET`、`PORT`）改完 `pm2 reload hunterdoc --update-env` 即可。
 
-### Step 1：代码同步与依赖安装
+## 部署中踩到的坑
 
-- 目标：服务器上的代码与 main 一致，依赖装好
-- 操作：`/www/wwwroot/hunterdoc` 下 clone 仓库（或从 `/home/kyle/studio/HunterDoc` 迁移），Node 切到 v22.22.1，`npm ci`
-- 验证：`node_modules/.prisma/client/` 下出现 `libquery_engine-rhel-openssl-3.0.x.so.node`
-- 依赖：无
+按类别归档，均已修复并验证。
 
-### Step 2：运行时配置
+### nginx 全局缓存导致鉴权绕过（最严重）
 
-- 目标：产出 pm2 与 nginx 配置
-- 文件：`deploy/ecosystem.hunterdoc.cjs`（两个 app：hunterdoc 3100 / hunterdoc-collab 1999）、`deploy/nginx-hunterdoc.conf.template`（`/` 反代 3100，`/parties/` 反代 1999 且带 WebSocket upgrade 头）
-- 验证：端口、路径、upgrade 头与目标架构一致
-- 依赖：无
+宝塔在 `proxy.conf` 的 http 块启用了 `proxy_cache cache_one`，且未定义 `proxy_cache_key`，用的是不含 Cookie 的默认键。全站需要鉴权的应用被这样缓存，等于把某个用户的页面响应发给所有访问者——现象是未登录访问首页却拿到工作台布局。
 
-### Step 3：环境变量与构建
+已在两个 proxy 块加 `proxy_cache off` 并清空缓存目录。**同机的 Orbiter 未做此处理**，若其存在鉴权接口需同样处理。
 
-- 目标：产出可运行的 standalone
-- 环境变量（`.env.production`，不入库）：`DATABASE_URL`、`AUTH_SECRET`（32 字节随机，协作服务共用同一值）、`NEXT_PUBLIC_APP_URL=https://hunterdoc.expture.cn`、`NEXT_PUBLIC_PARTYKIT_HOST=hunterdoc.expture.cn`、`PORT=3100`
-- 操作：`npx prisma generate && npm run build`
-- OOM 应对：构建前先 `pm2 stop` 掉非必要进程腾内存；仍失败则给 node 加 `--max-old-space-size` 限制，或临时扩 swap；再不行退回本地/CI 构建后上传产物（此时需按约束 2 加 binaryTargets）
-- 验证：`.next/standalone/server.js` 存在，`free -h` 构建期间未耗尽
-- 依赖：前置动作中的 SSL 必须先完成（约束 1）
+### middleware 重定向指向内部地址
 
-### Step 4：数据库初始化
+`new URL(path, request.url)` 在反代后拿到的是内部监听地址，浏览器被送往 `localhost:3100`。`request.nextUrl` 同样不可用；相对 `Location` 也不行，middleware 运行时会对它做 `new URL()` 并抛 `ERR_INVALID_URL`。
 
-- 目标：建表并写入团队账号
-- 操作：`npx prisma db push`，然后跑 seed
-- 注意：seed 在容器里踩过 Node 类型剥离不补扩展名的坑（见 `docs/standards/docker-build.md` 失败案例二第 3 条），服务器上有 tsx 可用，走 `npm run db:seed` 更稳
-- 验证：`psql` 查 User 表有 11 条记录
-- 依赖：Step 1、Step 3
+最终改为锚定 `NEXT_PUBLIC_APP_URL`。中途曾用 `Host` / `X-Forwarded-Host` 重建 origin，但那是开放重定向——nginx 不覆盖 `X-Forwarded-Host`，请求可以用合法 Host 通过 `server_name` 匹配，同时在转发头里夹带攻击者域名。现已在应用与 nginx 两层封堵。
 
-### Step 5：进程托管
+### 前端未校验响应状态码
 
-- 目标：两个进程常驻并开机自启
-- 操作：宝塔 Node 项目管理器添加项目，启动文件 `.next/standalone/server.js`，端口 3100；协作服务用 pm2 另起一个跑 `partykit dev --port 1999`
-- 验证：`curl 127.0.0.1:3100/api/health` 返回 ok，1999 端口监听
-- 依赖：Step 3、Step 4
+`WorkspaceProvider.refresh()` 直接把响应体当 Workspace 存入 state，401 的 `{error}` 会让 `documents` 字段消失，所有读 `.length` 的地方抛错。本地开发从不触发，因为 middleware 总是先重定向。
 
-### Step 6：nginx 反代与 HTTPS
+### 其余
 
-- 目标：`https://hunterdoc.expture.cn` 可访问，WebSocket 正常升级
-- 操作：用户在宝塔站点配置粘贴 Step 2 的模板
-- 验证：`curl -I https://hunterdoc.expture.cn/api/health` 返回 200；浏览器打开文档页，Network 里 `/parties/` 请求返回 101 Switching Protocols
-- 依赖：Step 2、Step 5
+- **pm2 不认配置文件名**：pm2 只把匹配 `.config.cjs` 模式的文件当 ecosystem，`ecosystem.hunterdoc.cjs` 被当普通脚本执行
+- **宝塔站点 root 指向部署目录**：源码树暴露在 web 根下，需改到独立空目录；但 ACME 验证文件仍写在面板记录的原路径，`/.well-known/` 要单独指定 root
+- **面板生成的正则 location 抢占静态资源**：`location ~ .*\.(js|css)?$` 优先级高于前缀 `/`，会让 `/_next/static/*.js` 走文件系统返回 404
+- **`.user.ini` 带 immutable 属性**：面板为 PHP 站点生成，`chattr +i` 使 root 也无法 `chown -R`，会中断部署脚本。脚本已加解除与清理
 
-### Step 7：端到端验收
+## 遗留事项
 
-- 检查项：登录、建文档、协同编辑、刷新后内容持久化；`http://dev.expture.cn` 仍然 200；`free -h` 内存余量健康；重启机器后两个服务自启
-- 依赖：Step 6
+- `dev.expture.cn` 的证书只覆盖 `orbiter.expture.cn`，而 Orbiter 的 vhost 绑定了两个域名且强制 HTTPS，从前者访问会有证书告警。需重新申请时勾选两个域名
+- 协作服务当前是常驻的 `partykit dev`（开发模式），替换为自建 y-websocket 见下方 Step 8
+- 尚未接入 CI 构建。服务器无法从 GitHub artifact CDN 下载（实测 60s 超时零字节），若要自动化需采用 CI 侧 scp 推送，部署脚本本身无需改动
 
-### Step 8：协作服务替换为自建 y-websocket
+## Step 8：协作服务替换为自建 y-websocket
 
-第二阶段，勘察结论如下（改动面比预期小）：
+第二阶段任务，勘察结论：
 
-- 客户端只有一个接入点：`components/CollaborativeEditor.tsx:154` 的 `YPartyKitProvider`。表格、思维导图、多维表格都没有接协作 provider
+- 客户端只有一个接入点：`components/CollaborativeEditor.tsx` 的 `YPartyKitProvider`。表格、思维导图、多维表格都未接协作 provider
 - `y-partykit/provider` 本身 fork 自 y-websocket，`connect` / `params` / `awareness` / `on("synced")` / `on("connection-error")` 基本同名
-- **服务端不需要实现 Yjs 持久化**：`CollaborativeEditor.tsx:447-452` 在 synced 后判断 Yjs fragment 为空就用 DB 的 `initialContent` 填充，因此全员离线导致协作状态丢失可从 Postgres 重建。自建服务端只需做「鉴权 + 房间广播」
+- **服务端无需实现 Yjs 持久化**：`CollaborativeEditor.tsx` 在 synced 后判断 Yjs fragment 为空即用 DB 的 `initialContent` 填充，因此协作状态丢失可从 Postgres 重建。自建服务端只需做鉴权与房间广播
 
-涉及文件：
-
-- 新增：`server/collab-server.ts`（upgrade 阶段复用 `lib/security/collab-token.ts` 的 `verifyCollabToken` 校验 token 与 room 匹配）
-- 修改：`components/CollaborativeEditor.tsx`、`lib/partykit-host.ts`、`package.json`（加 `y-websocket` + `ws`，移除 `y-partykit` / `partykit`）
-- 删除：`party/collab.ts`、`partykit.json`、`party` / `deploy:partykit` 脚本
+涉及文件：新增 `server/collab-server.ts`（复用 `lib/security/collab-token.ts` 的 `verifyCollabToken`）；修改 `components/CollaborativeEditor.tsx`、`lib/partykit-host.ts`、`package.json`；删除 `party/collab.ts`、`partykit.json` 及相关脚本。
 
 两个不能省的实现难点：
 
-1. **async params**：现在 token 获取是异步函数（`params: async () => ...`），而 y-websocket 的 `params` 只接受同步对象。需要把 token 获取提到 provider 构造之前
-2. **只读权限**：PartyKit 版靠 `onConnect(..., { readOnly: payload.access === "read" })` 实现分享链接只读，y-websocket 的 `setupWSConnection` 没有内置等价能力，需自行实现（拒绝该连接发来的 update 消息）。这是分享功能的权限边界，不能省
+1. **async params**：现在 token 获取是异步函数，而 y-websocket 的 `params` 只接受同步对象，需把 token 获取提到 provider 构造之前
+2. **只读权限**：PartyKit 版靠 `onConnect(..., { readOnly })` 实现分享链接只读，y-websocket 的 `setupWSConnection` 无等价能力，需自行拒绝该连接的 update 消息。这是分享功能的权限边界
 
-验证标准：两个浏览器同时编辑同一文档能实时同步；只读分享链接无法写入；断开全部连接后重新打开内容仍在
-
-依赖：Step 7 完成后进行
-
-## 风险
-
-- **服务器构建 OOM 是头号风险**。可用内存仅 1.1G，Next 15 要打包 Univer 全家桶 + Tiptap + Yjs。应对手段见 Step 3
-- 运行期三者叠加（Next + PostgreSQL + Orbiter）内存紧张，需给 pm2 配 `max_memory_restart` 并观察
-- 第一阶段的协作服务是常驻的 `partykit dev`，属开发模式，稳定性无承诺，这也是 Step 8 存在的原因
-- 项目无测试，验收依赖 lint、类型检查与实际访问
-- 数据库走 `prisma db push` 而非版本化迁移，生产改 schema 前需人工评估数据影响
+验证标准：两个浏览器同时编辑能实时同步；只读分享链接无法写入；断开全部连接后重新打开内容仍在。
