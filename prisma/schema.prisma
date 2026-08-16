@@ -1,8 +1,11 @@
 generator client {
   provider = "prisma-client-js"
-  // rhel target is required because build artifacts are produced locally and
-  // shipped to the OpenCloudOS host (RHEL family, OpenSSL 3.0)
-  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  // Build artifacts are produced off-box and shipped to the OpenCloudOS host,
+  // so the engine for that platform must be bundled alongside the native one.
+  // Prisma resolves that host to debian-openssl-1.0.x, not the rhel target its
+  // OS family and OpenSSL 3.0.12 would suggest; rhel is kept as a hedge in case
+  // a Prisma upgrade changes that detection.
+  binaryTargets = ["native", "debian-openssl-1.0.x", "rhel-openssl-3.0.x"]
 }
 
 datasource db {

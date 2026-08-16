@@ -37,12 +37,14 @@ fi
 
 [[ -f .next/standalone/server.js ]] || fail "no standalone output; is output:'standalone' still set in next.config.ts?"
 
-# The engine must match the server platform, not the build machine. See the
-# binaryTargets entry in prisma/schema.prisma.
-if ! ls .next/standalone/node_modules/.prisma/client/libquery_engine-rhel-openssl-3.0.x.so.node > /dev/null 2>&1; then
-  fail "rhel prisma engine missing from the bundle; run npx prisma generate and rebuild"
+# The engine must match what Prisma resolves on the target host, which is
+# debian-openssl-1.0.x there. Shipping a bundle without it fails at the first
+# query with PrismaClientInitializationError, not at startup, so check here.
+TARGET_ENGINE="libquery_engine-debian-openssl-1.0.x.so.node"
+if ! ls ".next/standalone/node_modules/.prisma/client/${TARGET_ENGINE}" > /dev/null 2>&1; then
+  fail "${TARGET_ENGINE} missing from the bundle; check binaryTargets in prisma/schema.prisma, run npx prisma generate and rebuild"
 fi
-ok "rhel prisma engine present"
+ok "target prisma engine present"
 
 info "staging to ${SSH_HOST}:${STAGE_DIR}"
 ssh "$SSH_HOST" "mkdir -p ${STAGE_DIR}/standalone ${STAGE_DIR}/static"

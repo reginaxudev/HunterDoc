@@ -3,7 +3,7 @@
  *
  * Usage (as root, on the server):
  *   cd /www/wwwroot/hunterdoc
- *   pm2 start deploy/ecosystem.hunterdoc.cjs
+ *   pm2 start deploy/ecosystem.config.cjs
  *   pm2 save
  *
  * Two processes:
@@ -32,6 +32,9 @@ module.exports = {
         PORT: "3100",
         HOSTNAME: "127.0.0.1",
       },
+      // the standalone server manages its own listener; cluster mode adds
+      // nothing here and Orbiter runs fork too
+      exec_mode: "fork",
       instances: 1,
       autorestart: true,
       max_memory_restart: "500M",
@@ -48,6 +51,7 @@ module.exports = {
       env: {
         NODE_ENV: "production",
       },
+      exec_mode: "fork",
       instances: 1,
       autorestart: true,
       max_memory_restart: "300M",

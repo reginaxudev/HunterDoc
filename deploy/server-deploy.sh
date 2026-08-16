@@ -74,7 +74,7 @@ info "restarting processes"
 if pm2 describe hunterdoc > /dev/null 2>&1; then
   pm2 reload hunterdoc --update-env
 else
-  pm2 start "$APP_DIR/deploy/ecosystem.hunterdoc.cjs" --only hunterdoc
+  pm2 start "$APP_DIR/deploy/ecosystem.config.cjs" --only hunterdoc
 fi
 pm2 save > /dev/null
 
