@@ -65,14 +65,25 @@ if [[ "$SKIP_DB" -eq 0 ]]; then
   # Missing CLI is an error, not something to skip past: silently not applying
   # a schema change is worse than failing the deploy.
   [[ -f "$PRISMA_CLI" ]] || fail "prisma CLI missing at $PRISMA_CLI. Run npm ci in $APP_DIR, or pass --skip-db if this release has no schema change."
-  # npm leaves the schema engine mode 644 on this host, and prisma spawns it as
-  # a process, so db push dies with EACCES. Idempotent, and cheap to repeat.
-  find "$APP_DIR/node_modules/@prisma/engines" -maxdepth 1 -name "schema-engine-*" \
-    -type f ! -perm -u+x -exec chmod +x {} + 2>/dev/null || true
   info "applying database schema"
   (cd "$APP_DIR" && set -a && . ./.env.production && set +a && \
     node "$PRISMA_CLI" db push --skip-generate)
   ok "schema applied"
+fi
+
+# npm on this host installs native binaries without the executable bit — 59 of
+# them after a plain npm ci. Anything that gets spawned then dies with EACCES:
+# the prisma schema engine breaks db push, and esbuild and workerd put the
+# collaboration server into a restart loop that pm2 hides behind "online".
+# Restore it for every bin directory rather than naming the offenders, since
+# which ones matter changes with the dependency tree.
+if [[ -d "$APP_DIR/node_modules" ]]; then
+  broken="$(find "$APP_DIR/node_modules" -type f -path "*/bin/*" ! -perm -u+x 2>/dev/null | wc -l)"
+  if [[ "$broken" -gt 0 ]]; then
+    info "restoring exec bit on ${broken} binaries"
+    find "$APP_DIR/node_modules" -type f -path "*/bin/*" ! -perm -u+x \
+      -exec chmod +x {} + 2>/dev/null || true
+  fi
 fi
 
 # The panel drops an immutable .user.ini into PHP site roots. It is useless

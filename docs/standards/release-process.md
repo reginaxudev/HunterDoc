@@ -112,7 +112,8 @@ ssh cloud-root 'bash /www/wwwroot/hunterdoc/deploy/server-deploy.sh'
 | CI 在 Assemble bundle 失败提示 engine missing | `binaryTargets` 被改动或 Prisma 升级改变了平台解析。在生产机跑 `npx prisma generate` 确认实际 target |
 | 部署成功但页面 500 | 看 `pm2 logs hunterdoc`。Prisma engine 不匹配会在首次查询时抛 `PrismaClientInitializationError`，而非启动时 |
 | 部署卡在 Ship and deploy | 跨境 SSH 传输 37MB 较慢，属正常。服务器端 `tail -f /var/log/hunterdoc-ci-deploy.log` 可见进度 |
-| db push 报 EACCES | `npm ci` 在该机留下的 Prisma 二进制缺执行位，`server-deploy.sh` 已内置幂等修复；若仍失败检查 `node_modules/@prisma/engines/` 权限 |
+| 任何 `EACCES` / `spawn ... EACCES` | 该机 `npm ci` 装出的原生二进制不带执行位（实测一次 npm ci 后有 59 个）。`server-deploy.sh` 每次部署会自动修复所有 `*/bin/*`。若手工排查：`find node_modules -type f -path "*/bin/*" ! -perm -u+x` |
+| 协作服务 pm2 显示 online 但文档打不开 | 同上。esbuild 或 workerd 缺执行位会让 partykit 崩溃重启，pm2 的 online 状态具有欺骗性，要看 `restart_time` 是否在增长与 `logs/collab-error.log` |
 | 未登录能看到工作台内容 | nginx 缓存越权。宝塔在 http 块全局启用 `proxy_cache` 且缓存键不含 Cookie，站点配置必须保留 `proxy_cache off` |
 
 ## 相关文档
