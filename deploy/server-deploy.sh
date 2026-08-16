@@ -68,6 +68,14 @@ if [[ "$SKIP_DB" -eq 0 ]]; then
   fi
 fi
 
+# The panel drops an immutable .user.ini into PHP site roots. It is useless
+# here (this site only reverse-proxies) but chattr +i makes chown -R fail even
+# as root, which would abort the deploy.
+if [[ -e "$APP_DIR/.user.ini" ]]; then
+  chattr -i "$APP_DIR/.user.ini" 2>/dev/null || true
+  rm -f "$APP_DIR/.user.ini"
+fi
+
 chown -R "${RUN_USER}:${RUN_USER}" "$APP_DIR"
 
 info "restarting processes"

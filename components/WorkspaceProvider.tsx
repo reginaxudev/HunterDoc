@@ -59,10 +59,22 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
 
   const refresh = useCallback(async () => {
-    const res = await fetch("/api/workspace");
-    const data = (await res.json()) as Workspace;
-    setWorkspace(data);
-    setLoading(false);
+    try {
+      const res = await fetch("/api/workspace");
+      // On 401 the body is {error}, not a Workspace. Storing it would strip
+      // documents/folders and crash every consumer that reads .length.
+      if (res.ok) {
+        const data = (await res.json()) as Workspace;
+        setWorkspace({
+          folders: data.folders ?? [],
+          documents: data.documents ?? [],
+        });
+      }
+    } catch {
+      // keep the last known state; the empty default is already safe
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const updateDocumentLocal = useCallback(

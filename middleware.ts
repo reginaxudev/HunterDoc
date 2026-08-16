@@ -25,6 +25,39 @@ function isPublicPath(pathname: string) {
   return false;
 }
 
+// Behind a reverse proxy neither request.url nor nextUrl carries the public
+// host: both report the internal listen address, which would redirect browsers
+// to localhost. A relative Location is not an option either — the middleware
+// runtime parses it with new URL() and throws ERR_INVALID_URL.
+//
+// So production redirects are anchored to the configured origin. Deriving it
+// from Host/X-Forwarded-Host would be an open redirect: the proxy does not
+// overwrite X-Forwarded-Host, so a request can carry a Host that matches our
+// server_name while smuggling an attacker's host in the forwarded header.
+// In development there is no proxy, so the request-derived origin is both
+// accurate and necessary for LAN access (see allowedDevOrigins in next.config).
+function externalOrigin(request: NextRequest) {
+  if (process.env.NODE_ENV === "production") {
+    const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+    if (configured) {
+      try {
+        return new URL(configured).origin;
+      } catch {
+        // malformed config, fall through to the request-derived origin
+      }
+    }
+  }
+  return request.nextUrl.origin;
+}
+
+function redirectTo(request: NextRequest, pathname: string) {
+  return NextResponse.redirect(new URL(pathname, externalOrigin(request)));
+}
+
+function loginRedirect(request: NextRequest, from: string) {
+  return redirectTo(request, `/login?from=${encodeURIComponent(from)}`);
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -41,16 +74,14 @@ export async function middleware(request: NextRequest) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("from", pathname);
-    return NextResponse.redirect(loginUrl);
+    return loginRedirect(request, pathname);
   }
 
   const session = await verifySessionToken(token);
   if (!session) {
     const response = pathname.startsWith("/api/")
       ? NextResponse.json({ error: "登录已过期" }, { status: 401 })
-      : NextResponse.redirect(new URL("/login", request.url));
+      : redirectTo(request, "/login");
     response.cookies.set({
       name: SESSION_COOKIE,
       value: "",
@@ -64,7 +95,7 @@ export async function middleware(request: NextRequest) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "需要管理员权限" }, { status: 403 });
     }
-    return NextResponse.redirect(new URL("/", request.url));
+    return redirectTo(request, "/");
   }
 
   return NextResponse.next();

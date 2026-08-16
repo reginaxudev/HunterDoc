@@ -1,28 +1,53 @@
 # Reverse proxy for hunterdoc.expture.cn
 #
-# Paste these two location blocks into the site's nginx config in the baota
-# panel (site settings -> config file), inside the existing server block that
-# already carries the Let's Encrypt certificate.
+# Paste these blocks into the site's nginx config in the baota panel (site
+# settings -> config file), inside the server block the panel generated.
 #
 # Do not add a server block of your own: the panel manages listen/server_name
-# and the certificate lines.
+# and writes the certificate lines between #SSL-START and #SSL-END.
+#
+# Two things must be removed from the panel's generated block:
+#   1. `root` pointing at the deployment directory — it would expose the source
+#      tree over HTTP. Point it at an empty directory instead.
+#   2. the `location ~ .*\.(js|css)?$` style blocks — regex locations outrank
+#      the prefix `/` below, so they would intercept /_next/static/*.js and
+#      serve 404s from the filesystem instead of proxying.
 
-# Uploads go through the app, so the default 1m body limit is too small.
+# uploads flow through the app, the 1m default is too small
 client_max_body_size 50m;
 
-# Collaboration WebSocket. Must come before the "/" block.
-# The Upgrade/Connection headers are what turn this into a WebSocket tunnel;
-# without them the client gets a plain 200 and the editor never syncs.
-location /parties/ {
+# ACME validation must win over the proxy blocks below, and it must read from
+# the path the panel recorded for this site (which is not the server-level
+# root), because that is where the panel writes challenge files.
+location ^~ /.well-known/ {
+    root /www/wwwroot/hunterdoc;
+    allow all;
+}
+
+location ~ "^/\.well-known/.*\.(php|jsp|py|js|css|lua|ts|go|zip|tar\.gz|rar|7z|sql|bak)$" {
+    return 403;
+}
+
+# Collaboration WebSocket. $connection_upgrade comes from the panel-wide
+# 0.websocket.conf map. Must come before the "/" block.
+location ^~ /parties/ {
     proxy_pass http://127.0.0.1:1999;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
+    proxy_set_header Connection $connection_upgrade;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
-    # Collaboration sockets are long-lived; the default 60s would drop them.
+    # overwrite rather than forward: a client-supplied X-Forwarded-Host would
+    # otherwise reach the app, which is an open-redirect vector
+    proxy_set_header X-Forwarded-Host $host;
+    # proxy.conf enables `proxy_cache cache_one` for the whole http block and
+    # its cache key has no Cookie component, so one user's authenticated page
+    # would be served to everyone. Every page here is behind auth.
+    proxy_cache off;
+    proxy_buffering off;
+    # collaboration sockets are long-lived; the 60s default would drop them
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
 }
@@ -34,5 +59,8 @@ location / {
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_cache off;
+    proxy_buffering off;
     proxy_read_timeout 300s;
 }
