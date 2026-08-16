@@ -1,8 +1,9 @@
 name: Docker Build & Deploy
 
+# Dormant. The production host has no Docker, so this image is not part of any
+# deploy path — see .github/workflows/release.yml for the one that ships.
+# Kept for a future move to a container platform; run it by hand if needed.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:

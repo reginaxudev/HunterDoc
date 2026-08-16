@@ -161,3 +161,56 @@ bash /www/wwwroot/hunterdoc/deploy/server-deploy.sh --skip-db  # 跳过库变更
 2. **只读权限**：PartyKit 版靠 `onConnect(..., { readOnly })` 实现分享链接只读，y-websocket 的 `setupWSConnection` 无等价能力，需自行拒绝该连接的 update 消息。这是分享功能的权限边界
 
 验证标准：两个浏览器同时编辑能实时同步；只读分享链接无法写入；断开全部连接后重新打开内容仍在。
+
+## CI/CD 发布流程
+
+主干开发，分支发布。构建在 GitHub 托管 runner 上完成，产物通过一把受限 SSH 密钥推送到服务器。
+
+### 发布一个版本
+
+```bash
+# 1. 在 main 上把 package.json 的 version 改成目标版本并提交
+# 2. 建发布分支并推送，分支名必须与 version 一致
+git checkout -b release/0.4.0
+git push origin release/0.4.0
+```
+
+推送后 `.github/workflows/release.yml` 自动执行：
+
+1. 校验分支名格式、与 `package.json` 的 version 一致、tag 未占用
+2. 构建 standalone，校验产物包含目标平台的 Prisma engine
+3. 打并推送 `v0.4.0` tag
+4. **停在 production environment 等待审批**
+5. 审批后把产物经 SSH 推到服务器，服务器执行 `db push` 并重启
+6. 创建 GitHub Release 并附带产物
+
+任一校验失败都会在打 tag 之前中止，不会留下半个发布。
+
+### 需要在 GitHub 配置的内容
+
+仓库 Settings 中：
+
+| 类型 | 名称 | 值 |
+| --- | --- | --- |
+| Secret | `DEPLOY_SSH_KEY` | 服务器 `/root/.ssh/hunterdoc_ci` 的私钥全文 |
+| Secret | `DEPLOY_HOST` | 服务器 IP |
+| Secret | `DEPLOY_USER` | `root` |
+| Secret | `DEPLOY_HOST_KEY` | `ssh-keyscan` 得到的主机公钥行，用于固定 host key |
+| Environment | `production` | 添加 required reviewers，这是发布闸门 |
+| Variable（可选） | `NEXT_PUBLIC_APP_URL` / `NEXT_PUBLIC_PARTYKIT_HOST` | 不设则用 workflow 内的默认值 |
+
+### 部署密钥的权限边界
+
+密钥在服务器 `authorized_keys` 中用 `command="..."` 锁定到 `deploy/ci-receive.sh`，并禁用 pty 与各类转发。客户端请求执行的任何命令都会被忽略，唯一的输入通道是 stdin 上的产物包。已实测：持该密钥执行 `cat /etc/shadow` 不会读到任何内容，只会触发部署脚本。
+
+即便密钥泄露，攻击者能做的上限是推送一个产物包触发一次部署，无法获得 shell、无法读取任意文件。
+
+### 为什么产物是推送而不是拉取
+
+服务器到 GitHub 的连通性是不对称的：Actions artifact 端点可达，但 Release CDN（`objects.githubusercontent.com`）完全不通，实测 60s 超时零字节，且 `github.com` 本身响应在 1s 到 12s 之间波动。让服务器主动拉会把发布成功率绑在这条不稳定的链路上。
+
+同时也评估过在服务器上跑 self-hosted runner：它省去暴露密钥，但需要常驻约 100MB 内存，而该机可用内存仅约 1.1G 且已承载两个应用与数据库。
+
+### 本地构建仍然可用
+
+`deploy/push-build.sh` 保留，用于绕过 CI 的紧急发布或调试。它与 CI 产出相同布局的产物，服务器端 `server-deploy.sh` 对两者一视同仁。

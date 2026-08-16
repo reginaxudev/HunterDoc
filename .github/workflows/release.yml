@@ -1,0 +1,145 @@
+name: Release
+
+# Trunk-based: develop on main, release by pushing release/<version>.
+# The branch name is the release contract — it must match package.json, and it
+# becomes the tag. Building here rather than on the box also removes the whole
+# class of cross-platform issues that come from building on a laptop.
+on:
+  push:
+    branches:
+      - "release/*"
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  build:
+    name: Build and tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and verify version
+        id: version
+        run: |
+          branch_version="${GITHUB_REF_NAME#release/}"
+          # The version reaches git tag through an expression, so constrain it
+          # to digits and dots before it can carry anything else.
+          if ! printf '%s' "$branch_version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::branch must be release/<major>.<minor>.<patch>, got release/${branch_version}"
+            exit 1
+          fi
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [ "$branch_version" != "$pkg_version" ]; then
+            echo "::error::branch release/${branch_version} does not match package.json version ${pkg_version}. Bump package.json or rename the branch."
+            exit 1
+          fi
+          if git rev-parse "v${branch_version}" >/dev/null 2>&1; then
+            echo "::error::tag v${branch_version} already exists. Bump the version to release again."
+            exit 1
+          fi
+          echo "version=${branch_version}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        env:
+          # NEXT_PUBLIC_* are inlined at build time, so they belong here and not
+          # in the server's .env.production. Changing one needs a new release.
+          NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://hunterdoc.expture.cn' }}
+          NEXT_PUBLIC_PARTYKIT_HOST: ${{ vars.NEXT_PUBLIC_PARTYKIT_HOST || 'hunterdoc.expture.cn' }}
+          NEXT_PUBLIC_SYNC_ENABLED: "false"
+          NEXT_PUBLIC_SYNC_POLL_INTERVAL_MS: "5000"
+        run: npm run build
+
+      - name: Assemble bundle
+        run: |
+          set -euo pipefail
+          # The engine must match what Prisma resolves on the target host.
+          # Shipping without it fails on the first query, not at startup.
+          engine="libquery_engine-debian-openssl-1.0.x.so.node"
+          if [ ! -f ".next/standalone/node_modules/.prisma/client/${engine}" ]; then
+            echo "::error::${engine} missing from the bundle; check binaryTargets in prisma/schema.prisma"
+            exit 1
+          fi
+          mkdir -p bundle
+          cp -r .next/standalone bundle/standalone
+          cp -r .next/static bundle/static
+          # sharp's platform build; the app has no next/image usage so it is
+          # dead weight in the bundle
+          rm -rf bundle/standalone/node_modules/@img
+          tar czf bundle.tar.gz -C bundle .
+          ls -lh bundle.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle
+          path: bundle.tar.gz
+          retention-days: 14
+
+      - name: Tag the release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+  deploy:
+    name: Deploy to production
+    needs: build
+    runs-on: ubuntu-latest
+    # Gated: the job waits here until the environment's reviewers approve.
+    environment:
+      name: production
+      url: https://hunterdoc.expture.cn
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle
+
+      - name: Ship and deploy
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pin the host key instead of disabling checking, so a hijacked DNS
+          # or IP cannot collect our deploy connection.
+          printf '%s\n' "$DEPLOY_HOST_KEY" > ~/.ssh/known_hosts
+          # The key is restricted server-side to the receive script, so the
+          # command sent here is ignored; the tarball on stdin is the payload.
+          ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" < bundle.tar.gz
+
+  publish:
+    name: Publish release notes
+    needs: [build, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundle
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.build.outputs.version }}
+          name: v${{ needs.build.outputs.version }}
+          generate_release_notes: true
+          files: bundle.tar.gz

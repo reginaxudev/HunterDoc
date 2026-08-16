@@ -58,14 +58,21 @@ rsync -a "$APP_DIR/public/" "$STANDALONE_DST/public/"
 ok "assembled"
 
 if [[ "$SKIP_DB" -eq 0 ]]; then
-  if [[ -x "$APP_DIR/node_modules/.bin/prisma" ]]; then
-    info "applying database schema"
-    (cd "$APP_DIR" && set -a && . ./.env.production && set +a && \
-      ./node_modules/.bin/prisma db push --skip-generate)
-    ok "schema applied"
-  else
-    info "prisma CLI not found in $APP_DIR/node_modules, skipping db push"
-  fi
+  # Invoke the CLI entry point directly rather than through node_modules/.bin:
+  # npm leaves build/index.js mode 644, so the bin symlink is not executable
+  # and an -x test would silently report the CLI as absent.
+  PRISMA_CLI="$APP_DIR/node_modules/prisma/build/index.js"
+  # Missing CLI is an error, not something to skip past: silently not applying
+  # a schema change is worse than failing the deploy.
+  [[ -f "$PRISMA_CLI" ]] || fail "prisma CLI missing at $PRISMA_CLI. Run npm ci in $APP_DIR, or pass --skip-db if this release has no schema change."
+  # npm leaves the schema engine mode 644 on this host, and prisma spawns it as
+  # a process, so db push dies with EACCES. Idempotent, and cheap to repeat.
+  find "$APP_DIR/node_modules/@prisma/engines" -maxdepth 1 -name "schema-engine-*" \
+    -type f ! -perm -u+x -exec chmod +x {} + 2>/dev/null || true
+  info "applying database schema"
+  (cd "$APP_DIR" && set -a && . ./.env.production && set +a && \
+    node "$PRISMA_CLI" db push --skip-generate)
+  ok "schema applied"
 fi
 
 # The panel drops an immutable .user.ini into PHP site roots. It is useless
