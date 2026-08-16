@@ -1,5 +1,8 @@
 generator client {
   provider = "prisma-client-js"
+  // rhel target is required because build artifacts are produced locally and
+  // shipped to the OpenCloudOS host (RHEL family, OpenSSL 3.0)
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {

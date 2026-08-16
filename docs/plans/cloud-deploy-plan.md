@@ -11,7 +11,7 @@
         └── /parties/    → 127.0.0.1:1999    协作服务 WebSocket
 
   PostgreSQL  127.0.0.1:5432   库与用户均为 hunterdoc
-  部署目录     /www/wwwroot/hunterdoc.expture.cn
+  部署目录     /www/wwwroot/hunterdoc
   进程管理     宝塔 Node 项目管理器（root 的 pm2 托管，www 用户运行），与 Orbiter 同构
   构建方式     服务器本地构建（不走 CI）
 
@@ -74,7 +74,7 @@ PartyKit CLI 只有 `partykit dev`（miniflare 本地模拟）和 `partykit depl
 ### Step 1：代码同步与依赖安装
 
 - 目标：服务器上的代码与 main 一致，依赖装好
-- 操作：`/www/wwwroot/hunterdoc.expture.cn` 下 clone 仓库（或从 `/home/kyle/studio/HunterDoc` 迁移），Node 切到 v22.22.1，`npm ci`
+- 操作：`/www/wwwroot/hunterdoc` 下 clone 仓库（或从 `/home/kyle/studio/HunterDoc` 迁移），Node 切到 v22.22.1，`npm ci`
 - 验证：`node_modules/.prisma/client/` 下出现 `libquery_engine-rhel-openssl-3.0.x.so.node`
 - 依赖：无
 

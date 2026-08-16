@@ -1,8 +1,8 @@
 /**
- * PM2 config for the hunterdoc.expture.cn deployment.
+ * PM2 config for the hunterdoc deployment (hunterdoc.expture.cn).
  *
  * Usage (as root, on the server):
- *   cd /www/wwwroot/hunterdoc.expture.cn
+ *   cd /www/wwwroot/hunterdoc
  *   pm2 start deploy/ecosystem.hunterdoc.cjs
  *   pm2 save
  *
