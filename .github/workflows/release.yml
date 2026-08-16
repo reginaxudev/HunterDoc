@@ -5,10 +5,9 @@ name: Release
 # becomes the tag. Building here rather than on the box also removes the whole
 # class of cross-platform issues that come from building on a laptop.
 #
-# This workflow only builds and publishes; it never touches production.
-# Shipping is a separate, manually dispatched workflow (deploy.yml) because
-# environment protection rules are not available on private repos under the
-# free plan, so the manual dispatch is what provides the release gate.
+# Pushing a release branch takes it all the way to production: build, tag,
+# publish, deploy. Shipping itself lives in deploy.yml and is called from here,
+# so the same path can be re-run by hand against an older tag to roll back.
 on:
   push:
     branches:
@@ -85,6 +84,11 @@ jobs:
           # sharp's platform build; the app has no next/image usage so it is
           # dead weight in the bundle
           rm -rf bundle/standalone/node_modules/@img
+          # binaryTargets emits an engine per platform, but only the target
+          # host's is ever loaded. The other two are ~35MB of dead weight on a
+          # link that runs at roughly 50KB/s.
+          find bundle/standalone/node_modules -name 'libquery_engine-*' \
+            ! -name "${engine}" -delete
           tar czf bundle.tar.gz -C bundle .
           ls -lh bundle.tar.gz
 
@@ -120,6 +124,11 @@ jobs:
           generate_release_notes: true
           files: bundle.tar.gz
 
-      - name: Next step
-        run: |
-          echo "::notice::Built v${{ needs.build.outputs.version }}. Deploy it from Actions -> Deploy -> Run workflow."
+  # Deploy only after publish, because it pulls the bundle off the release.
+  deploy:
+    name: Deploy
+    needs: [build, publish]
+    uses: ./.github/workflows/deploy.yml
+    with:
+      tag: v${{ needs.build.outputs.version }}
+    secrets: inherit

@@ -1,14 +1,20 @@
 name: Deploy
 
-# The release gate. release.yml builds and publishes but never ships; this
-# workflow is dispatched by hand, so nothing reaches production without a
-# deliberate action. It exists as a separate workflow rather than an approval
-# step because environment protection rules require a paid plan on private
-# repositories.
+# Ships a published release by tag: what reaches production is exactly the
+# artifact that was built and tagged, never a rebuild.
 #
-# It deploys a published release by tag, which means what ships is exactly the
-# artifact that was built and tagged — no rebuild, no drift.
+# Two entry points on purpose:
+#   workflow_call     release.yml calls this right after publishing, so a push
+#                     to release/x.y.z goes all the way to production
+#   workflow_dispatch run it by hand with any older tag — that is the rollback
+#                     path, and it costs one dispatch rather than a revert and
+#                     a rebuild
 on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:
@@ -18,6 +24,14 @@ on:
 
 permissions:
   contents: read
+
+# One deploy at a time. server-deploy.sh replaces the standalone tree in place
+# and reloads pm2, so two overlapping runs would interleave file writes on the
+# same directory. Queue rather than cancel: cancelling mid-transfer would leave
+# a partially written bundle on the box.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
 
 jobs:
   deploy:
