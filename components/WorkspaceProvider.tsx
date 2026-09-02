@@ -99,16 +99,31 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (isLoginPage) return;
-    if (process.env.NEXT_PUBLIC_SYNC_ENABLED !== "true") return;
 
-    const intervalMs = Number(process.env.NEXT_PUBLIC_SYNC_POLL_INTERVAL_MS ?? 5000);
-    const pollMs = Number.isFinite(intervalMs) && intervalMs >= 2000 ? intervalMs : 5000;
+    const raw =
+      process.env.NEXT_PUBLIC_WORKSPACE_POLL_MS ??
+      process.env.NEXT_PUBLIC_SYNC_POLL_INTERVAL_MS ??
+      "5000";
+    const intervalMs = Number(raw);
+    // 默认开启多账号侧边栏同步；设为 0 可关闭
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
+    const pollMs = intervalMs >= 2000 ? intervalMs : 5000;
 
     const timer = setInterval(() => {
       void refresh();
     }, pollMs);
 
-    return () => clearInterval(timer);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
   }, [refresh, isLoginPage]);
 
   const createByType = useCallback(

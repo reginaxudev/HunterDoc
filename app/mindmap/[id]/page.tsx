@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import WorkspaceItemHeader, { useAutoSaveContent } from "@/components/WorkspaceItemHeader";
@@ -14,16 +14,20 @@ import { handleMentionPick, type StoredMention } from "@/lib/content-mentions";
 import { authUserToCollabUser } from "@/lib/user";
 import type { MentionItem } from "@/lib/mentions";
 import { useDocumentTitleSync } from "@/lib/use-document-title-sync";
+import { useRemoteDocumentSync } from "@/lib/use-remote-document-sync";
 
 export default function MindmapPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
+  const dirtyRef = useRef(false);
+  const localUpdatedAtRef = useRef<string | null>(null);
 
   const [doc, setDoc] = useState<Document | null>(null);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState<MindmapData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [editorKey, setEditorKey] = useState(id);
 
   const documentHref = getContentPath(id, "mindmap");
   const { user: authUser } = useAuth();
@@ -34,6 +38,26 @@ export default function MindmapPage() {
     title,
     setTitle
   );
+
+  const applyRemoteDocument = useCallback(
+    (remote: Document) => {
+      if (remote.contentType !== "mindmap") return;
+      setDoc(remote);
+      setTitle(remote.title);
+      syncTitleMeta(remote.title, remote.updatedAt);
+      setContent(remote.content as unknown as MindmapData);
+      dirtyRef.current = false;
+      setEditorKey(`${id}-${remote.updatedAt}`);
+    },
+    [id, syncTitleMeta]
+  );
+
+  useRemoteDocumentSync({
+    documentId: id,
+    isDirtyRef: dirtyRef,
+    localUpdatedAtRef,
+    onRemoteUpdate: applyRemoteDocument,
+  });
 
   useEffect(() => {
     async function load() {
@@ -50,7 +74,9 @@ export default function MindmapPage() {
       setDoc(data);
       setTitle(data.title);
       syncTitleMeta(data.title, data.updatedAt);
+      localUpdatedAtRef.current = data.updatedAt;
       setContent(data.content as unknown as MindmapData);
+      dirtyRef.current = false;
       setLoading(false);
     }
     load();
@@ -60,10 +86,19 @@ export default function MindmapPage() {
     id,
     title,
     content as unknown as Record<string, unknown> | null,
-    { skipInitial: true }
+    {
+      skipInitial: true,
+      isDirtyRef: dirtyRef,
+      onSaved: () => {
+        const updatedAt = new Date().toISOString();
+        localUpdatedAtRef.current = updatedAt;
+        setDoc((prev) => (prev ? { ...prev, updatedAt } : prev));
+      },
+    }
   );
 
   const updateMentions = (next: StoredMention[]) => {
+    dirtyRef.current = true;
     setContent((prev) => (prev ? { ...prev, mentions: next } : prev));
   };
 
@@ -108,8 +143,12 @@ export default function MindmapPage() {
         onMentionsChange={updateMentions}
       >
         <MindmapEditor
+          key={editorKey}
           data={content}
-          onChange={setContent}
+          onChange={(next) => {
+            dirtyRef.current = true;
+            setContent(next);
+          }}
           documentId={id}
           onMention={handleMention}
         />

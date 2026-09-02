@@ -162,36 +162,11 @@ export async function readWorkspace(): Promise<Workspace> {
 }
 
 export async function readWorkspaceForUser(
-  userId: string,
-  role: "ADMIN" | "MEMBER"
+  _userId: string,
+  _role: "ADMIN" | "MEMBER"
 ): Promise<Workspace> {
-  await ensureDefaultFolders();
-
-  if (role === "ADMIN") {
-    return readWorkspace();
-  }
-
-  const collaboratorRows = await prisma.documentCollaborator.findMany({
-    where: { userId },
-    select: { documentId: true },
-  });
-  const documentIds = collaboratorRows.map((r) => r.documentId);
-
-  const [folders, documents] = await Promise.all([
-    prisma.folder.findMany({ orderBy: { createdAt: "asc" } }),
-    documentIds.length > 0
-      ? prisma.document.findMany({
-          where: { id: { in: documentIds } },
-          select: WORKSPACE_DOCUMENT_SELECT,
-          orderBy: { updatedAt: "desc" },
-        })
-      : Promise.resolve([]),
-  ]);
-
-  return {
-    folders: folders.map(mapFolder),
-    documents: documents.map(mapDocumentSummary),
-  };
+  // 团队共享工作区：所有登录成员看到同一套文档/文件夹，便于多账号实时同步
+  return readWorkspace();
 }
 
 export async function createDocument(

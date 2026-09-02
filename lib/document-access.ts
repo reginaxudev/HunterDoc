@@ -18,20 +18,23 @@ export function meetsDocumentAccess(
   return LEVEL_RANK[actual] >= LEVEL_RANK[required];
 }
 
-/** 成员可访问的文档 ID；管理员返回 null 表示不限制 */
+/**
+ * 可访问的文档 ID 集合。
+ * 返回 null 表示团队内不限制（全员共享工作区）。
+ */
 export async function getAccessibleDocumentIds(
-  userId: string,
-  role: SessionUser["role"]
+  _userId: string,
+  _role: SessionUser["role"]
 ): Promise<Set<string> | null> {
-  if (role === "ADMIN") return null;
-
-  const rows = await prisma.documentCollaborator.findMany({
-    where: { userId },
-    select: { documentId: true },
-  });
-  return new Set(rows.map((r) => r.documentId));
+  return null;
 }
 
+/**
+ * 文档权限：
+ * - 管理员：可管理
+ * - 已单独设置协作者：按其权限
+ * - 其余活跃成员：默认可编辑（团队共享，无需逐个邀请才能看到/同步）
+ */
 export async function getDocumentAccessForUser(
   userId: string,
   role: SessionUser["role"],
@@ -44,12 +47,14 @@ export async function getDocumentAccessForUser(
       documentId_userId: { documentId, userId },
     },
   });
-  if (!row) return null;
+  if (row) {
+    const permission = row.permission.toLowerCase();
+    if (permission === "manage") return "manage";
+    if (permission === "edit") return "edit";
+    return "read";
+  }
 
-  const permission = row.permission.toLowerCase();
-  if (permission === "manage") return "manage";
-  if (permission === "edit") return "edit";
-  return "read";
+  return "edit";
 }
 
 export async function requireDocumentAccess(

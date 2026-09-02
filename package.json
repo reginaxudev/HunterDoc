@@ -14,6 +14,7 @@
     "db:local": "docker compose up -d",
     "docker:local": "node scripts/docker-local.mjs",
     "online:proxy": "node scripts/proxy-online.mjs",
+    "online:start": "bash scripts/start-online-entry.sh",
     "docker:local:logs": "docker compose -f docker-compose.local.yml logs -f",
     "docker:local:stop": "docker compose -f docker-compose.local.yml down",
     "docker:local:reset": "docker compose -f docker-compose.local.yml down -v && node scripts/docker-local.mjs",

@@ -24,6 +24,7 @@ import { authUserToCollabUser } from "@/lib/user";
 import DocumentHistoryPanel from "@/components/DocumentHistoryPanel";
 
 import { useDocumentTitleSync } from "@/lib/use-document-title-sync";
+import { useRemoteDocumentSync } from "@/lib/use-remote-document-sync";
 import { buildSheetSavePayload } from "@/lib/sheet-save";
 
 const SHEET_AUTOSAVE_INTERVAL_MS = 60_000;
@@ -35,6 +36,7 @@ export default function SheetPage() {
   const id = params.id as string;
   const sheetRef = useRef<UniverSheetEditorRef>(null);
   const sheetDirtyRef = useRef(false);
+  const localUpdatedAtRef = useRef<string | null>(null);
   const lastSavedSheetRef = useRef<UniverSheetData | SheetContent | null>(null);
   const notifiedMentionKeysRef = useRef<Set<string>>(new Set());
   const { user: authUser } = useAuth();
@@ -71,10 +73,33 @@ export default function SheetPage() {
     setDoc((prev) => {
       if (!prev) return prev;
       const updatedAt = new Date().toISOString();
+      localUpdatedAtRef.current = updatedAt;
       syncTitleMeta(titleRef.current, updatedAt);
       return { ...prev, title: titleRef.current, updatedAt };
     });
   }, [syncTitleMeta, content]);
+
+  const applyRemoteDocument = useCallback(
+    (remote: Document) => {
+      if (remote.contentType !== "sheet") return;
+      const nextContent = remote.content as unknown as UniverSheetData | SheetContent;
+      setDoc(remote);
+      setTitle(remote.title);
+      syncTitleMeta(remote.title, remote.updatedAt);
+      setContent(nextContent);
+      lastSavedSheetRef.current = compactSheetPayloadForSave(nextContent);
+      sheetDirtyRef.current = false;
+      setEditorKey(`${id}-${remote.updatedAt}`);
+    },
+    [id, syncTitleMeta]
+  );
+
+  useRemoteDocumentSync({
+    documentId: id,
+    isDirtyRef: sheetDirtyRef,
+    localUpdatedAtRef,
+    onRemoteUpdate: applyRemoteDocument,
+  });
 
   const buildSheetPayload = useCallback(
     (latest: Record<string, unknown>, options: { skipRevision?: boolean }) => {
@@ -139,10 +164,12 @@ export default function SheetPage() {
       setDoc(data);
       setTitle(data.title);
       syncTitleMeta(data.title, data.updatedAt);
+      localUpdatedAtRef.current = data.updatedAt;
       setContent(data.content as unknown as UniverSheetData | SheetContent);
       lastSavedSheetRef.current = compactSheetPayloadForSave(
         data.content as UniverSheetData | SheetContent
       );
+      sheetDirtyRef.current = false;
       const loaded = data.content as UniverSheetData | SheetContent;
       if (isUniverSheetData(loaded)) {
         for (const m of loaded.mentions ?? []) {
@@ -236,7 +263,9 @@ export default function SheetPage() {
                 setDoc(restored);
                 setTitle(restored.title);
                 syncTitleMeta(restored.title, restored.updatedAt);
+                localUpdatedAtRef.current = restored.updatedAt;
                 setContent(restored.content as unknown as UniverSheetData | SheetContent);
+                sheetDirtyRef.current = false;
                 setEditorKey(`${id}-${Date.now()}`);
               }}
             />
