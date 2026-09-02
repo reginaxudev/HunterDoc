@@ -7,7 +7,7 @@ import ShareDialog from "@/components/ShareDialog";
 import { CONTENT_TYPE_META } from "@/lib/content-types";
 import type { ContentType } from "@/types/document";
 import { formatRelativeTime } from "@/lib/utils";
-import { encodeSavePayload, saveFailureMessage, type SaveDocumentPayload } from "@/lib/save-payload-client";
+import { encodeSavePayload, saveFailureMessage, SAVE_REQUEST_TIMEOUT_MS, type SaveDocumentPayload } from "@/lib/save-payload-client";
 
 function normalizeSavePayloads(
   built: SaveDocumentPayload | SaveDocumentPayload[] | null,
@@ -163,7 +163,7 @@ export function useAutoSaveContent(
       | SaveDocumentPayload[]
       | null
       | Promise<SaveDocumentPayload | SaveDocumentPayload[] | null>;
-    onSaved?: () => void;
+    onSaved?: (meta?: { updatedAt?: string; title?: string }) => void;
   }
 ) {
   const delay = options?.delay ?? 1500;
@@ -199,16 +199,18 @@ export function useAutoSaveContent(
     async (
       override?: Record<string, unknown>,
       saveOptions?: { skipRevision?: boolean }
-    ) => {
+    ): Promise<{ ok: boolean; updatedAt?: string; title?: string }> => {
       const latest =
         override ?? getLatestContentRef.current?.() ?? contentRef.current;
       if (!latest) {
         setSaveError("无法读取表格内容，请刷新页面后重试。");
-        return false;
+        return { ok: false };
       }
 
       setSaveStatus("saving");
       setSaveError(null);
+      let lastUpdatedAt: string | undefined;
+      let lastTitle: string | undefined;
       try {
         const built = buildPayloadRef.current
           ? await buildPayloadRef.current(latest, {
@@ -226,7 +228,7 @@ export function useAutoSaveContent(
           setSaveStatus("saved");
           if (isDirtyRef) isDirtyRef.current = false;
           onSavedRef.current?.();
-          return true;
+          return { ok: true };
         }
 
         for (const payload of payloads) {
@@ -234,21 +236,50 @@ export function useAutoSaveContent(
 
           if (wire.byteLength > 4_200_000) {
             setSaveError("表格仍然过大，请删除无用行列或拆成多个表格。");
-            return false;
+            return { ok: false };
           }
 
-          const res = await fetch(`/api/documents/${docId}`, {
-            method: "PATCH",
-            headers: wire.headers,
-            credentials: "same-origin",
-            body: wire.body,
-          });
+          const controller = new AbortController();
+          const timeoutId = window.setTimeout(
+            () => controller.abort(),
+            SAVE_REQUEST_TIMEOUT_MS
+          );
+          let res: Response;
+          try {
+            res = await fetch(`/api/documents/${docId}`, {
+              method: "PATCH",
+              headers: wire.headers,
+              credentials: "same-origin",
+              body: wire.body,
+              signal: controller.signal,
+            });
+          } catch (err) {
+            if (err instanceof DOMException && err.name === "AbortError") {
+              setSaveError("保存超时，请检查网络后重试。");
+              return { ok: false };
+            }
+            throw err;
+          } finally {
+            window.clearTimeout(timeoutId);
+          }
+
           if (!res.ok) {
             setSaveError(saveFailureMessage(res.status));
-            return false;
+            return { ok: false };
+          }
+
+          try {
+            const data = (await res.json()) as {
+              updatedAt?: string;
+              title?: string;
+            };
+            if (typeof data.updatedAt === "string") lastUpdatedAt = data.updatedAt;
+            if (typeof data.title === "string") lastTitle = data.title;
+          } catch {
+            // slim/empty body is fine
           }
         }
-        return true;
+        return { ok: true, updatedAt: lastUpdatedAt, title: lastTitle };
       } catch (err) {
         console.error("Save failed:", err);
         if (err instanceof Error && err.message.includes("SHEET_TOO_LARGE")) {
@@ -256,10 +287,10 @@ export function useAutoSaveContent(
         } else {
           setSaveError("保存失败，请打开控制台查看详情或刷新后重试。");
         }
-        return false;
+        return { ok: false };
       }
     },
-    [docId, defaultSkipRevision]
+    [docId, defaultSkipRevision, isDirtyRef]
   );
 
   const save = useCallback(
@@ -268,16 +299,21 @@ export function useAutoSaveContent(
       if (isDirtyRef) isDirtyRef.current = true;
 
       const job = saveChainRef.current.then(async (): Promise<void> => {
-        let ok = false;
+        let result: { ok: boolean; updatedAt?: string; title?: string } = {
+          ok: false,
+        };
         while (pendingSaveRef.current) {
           const pending = pendingSaveRef.current;
           pendingSaveRef.current = null;
-          ok = await runSave(pending.override, pending.saveOptions);
-          if (!ok) break;
+          result = await runSave(pending.override, pending.saveOptions);
+          if (!result.ok) break;
         }
-        if (ok) {
+        if (result.ok) {
           setSaveStatus("saved");
-          onSavedRef.current?.();
+          onSavedRef.current?.({
+            updatedAt: result.updatedAt,
+            title: result.title,
+          });
           if (isDirtyRef && !pendingSaveRef.current) isDirtyRef.current = false;
         } else {
           setSaveStatus("unsaved");

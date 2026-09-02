@@ -67,8 +67,13 @@ export function saveFailureMessage(status: number): string | null {
   if (status === 401 || status === 403) {
     return "登录已过期或无编辑权限，请重新登录。";
   }
+  if (status === 408 || status === 504) {
+    return "保存超时，请检查网络后重试。";
+  }
   if (status >= 500) {
     return "服务器错误，请稍后重试。";
   }
   return null;
 }
+
+export const SAVE_REQUEST_TIMEOUT_MS = 45_000;

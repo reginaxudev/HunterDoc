@@ -15,7 +15,7 @@ import { applySheetCellPatch, isSheetCellPatch } from "@/lib/sheet-save";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
   const auth = await requireAuth();
   if ("response" in auth) return auth.response;
 
@@ -23,6 +23,19 @@ export async function GET(_request: Request, context: RouteContext) {
     const { id } = await context.params;
     const check = await requireDocumentAccess(auth.user, id, "read");
     if ("response" in check) return check.response;
+
+    // 多端同步轮询：只查元数据，避免反复下载整表 JSON
+    const fields = new URL(request.url).searchParams.get("fields");
+    if (fields === "meta") {
+      return NextResponse.json({
+        id: check.doc.id,
+        title: check.doc.title,
+        contentType: check.doc.contentType,
+        updatedAt: check.doc.updatedAt,
+        icon: check.doc.icon,
+      });
+    }
+
     return NextResponse.json(check.doc);
   } catch (error) {
     console.error("Failed to get document:", error);
@@ -92,15 +105,13 @@ export async function PATCH(request: Request, context: RouteContext) {
       }
     }
 
-    if (skipRevision) {
-      return NextResponse.json({
-        id: doc.id,
-        title: doc.title,
-        updatedAt: doc.updatedAt,
-      });
-    }
-
-    return NextResponse.json(doc);
+    // 始终返回精简结果：大表格全文回传会拖垮客户端与代理，导致「保存中…」卡住
+    return NextResponse.json({
+      id: doc.id,
+      title: doc.title,
+      updatedAt: doc.updatedAt,
+      contentType: doc.contentType,
+    });
   } catch (error) {
     console.error("Failed to update document:", error);
     return NextResponse.json({ error: "更新失败" }, { status: 500 });

@@ -63,7 +63,7 @@ export default function SheetPage() {
     setTitle
   );
 
-  const handleSaved = useCallback(() => {
+  const handleSaved = useCallback((meta?: { updatedAt?: string; title?: string }) => {
     const snapshot = sheetRef.current?.getSnapshot();
     if (snapshot) {
       lastSavedSheetRef.current = compactSheetPayloadForSave(snapshot) as UniverSheetData;
@@ -72,10 +72,11 @@ export default function SheetPage() {
     }
     setDoc((prev) => {
       if (!prev) return prev;
-      const updatedAt = new Date().toISOString();
+      const updatedAt = meta?.updatedAt ?? new Date().toISOString();
+      const nextTitle = meta?.title ?? titleRef.current;
       localUpdatedAtRef.current = updatedAt;
-      syncTitleMeta(titleRef.current, updatedAt);
-      return { ...prev, title: titleRef.current, updatedAt };
+      syncTitleMeta(nextTitle, updatedAt);
+      return { ...prev, title: nextTitle, updatedAt };
     });
   }, [syncTitleMeta, content]);
 

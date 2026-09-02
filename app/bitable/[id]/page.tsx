@@ -89,8 +89,8 @@ export default function BitablePage() {
     {
       skipInitial: true,
       isDirtyRef: dirtyRef,
-      onSaved: () => {
-        const updatedAt = new Date().toISOString();
+      onSaved: (meta) => {
+        const updatedAt = meta?.updatedAt ?? new Date().toISOString();
         localUpdatedAtRef.current = updatedAt;
         setDoc((prev) => (prev ? { ...prev, updatedAt } : prev));
       },
